@@ -1,8 +1,8 @@
-import { NextResponse, type NextRequest } from 'next/navigation';
+import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { encrypt } from '@/lib/whatsapp/encryption';
-import { subscribeWebhookApp } from '@/lib/whatsapp/meta-api';
+import { subscribeWabaToApp } from '@/lib/whatsapp/meta-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -246,7 +246,7 @@ async function completeOAuthOnboarding(params: {
 
   // 4. Subscribe the client's WABA to our Meta App
   try {
-    await subscribeWebhookApp({ wabaId, accessToken });
+    await subscribeWabaToApp({ wabaId, accessToken });
     console.log(`[OAuth Onboarding] Successfully subscribed WABA ${wabaId} to app`);
   } catch (subErr) {
     console.warn(`[OAuth Onboarding] Webhook subscription warning for WABA ${wabaId}:`, subErr);
