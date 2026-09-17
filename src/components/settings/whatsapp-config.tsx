@@ -30,6 +30,7 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from '@/components/ui/accordion';
+import { ConnectWhatsAppModal } from '@/components/dashboard/connect-whatsapp-modal';
 import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
 
 const MASKED_TOKEN = '••••••••••••••••';
@@ -81,6 +82,7 @@ export function WhatsAppConfig() {
   const [testing, setTesting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [showToken, setShowToken] = useState(false);
+  const [esModalOpen, setEsModalOpen] = useState(false);
   const [config, setConfig] = useState<WhatsAppConfigType | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('unknown');
   const [resetReason, setResetReason] = useState<ResetReason>(null);
@@ -534,6 +536,31 @@ export function WhatsAppConfig() {
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       {/* Main config form */}
       <div className="space-y-6">
+        {/* 1-Click Embedded Signup Banner */}
+        <div className="p-5 rounded-2xl bg-gradient-to-r from-blue-600/10 via-indigo-600/10 to-purple-600/10 border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-600 text-white">
+                Recommended
+              </span>
+              <h3 className="text-sm font-bold text-foreground">1-Click WhatsApp Onboarding via Facebook</h3>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Connect your WhatsApp number automatically in 2 minutes using Meta Embedded Signup without manual API configuration.
+            </p>
+          </div>
+          <Button
+            type="button"
+            onClick={() => setEsModalOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white shrink-0 gap-2 font-semibold shadow-xs"
+          >
+            <svg className="w-4 h-4 fill-white" viewBox="0 0 24 24">
+              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+            </svg>
+            Connect with Facebook
+          </Button>
+        </div>
+
         {/* Corrupted-token reset banner */}
         {showResetBanner && (
           <Alert className="bg-amber-950/40 border-amber-600/40">
@@ -1043,6 +1070,14 @@ export function WhatsAppConfig() {
         </Card>
       </div>
     </div>
+
+    <ConnectWhatsAppModal
+      open={esModalOpen}
+      onClose={() => setEsModalOpen(false)}
+      onSuccess={() => {
+        if (accountId) fetchConfig(accountId);
+      }}
+    />
     </section>
   );
 }

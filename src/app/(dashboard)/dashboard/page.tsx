@@ -35,14 +35,19 @@ import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
 
 import { useTranslations } from 'next-intl'
+import { useSearchParams } from 'next/navigation'
+import { toast } from 'sonner'
+import { WhatsAppSetupGuide } from '@/components/dashboard/whatsapp-setup-guide'
 
 type RangeDays = 7 | 30 | 90
 
 export default function DashboardPage() {
   const t = useTranslations('Dashboard.page')
   const { defaultCurrency } = useAuth()
+  const searchParams = useSearchParams()
   const [metrics, setMetrics] = useState<MetricsBundle | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(true)
+  const [waConnected, setWaConnected] = useState<boolean | null>(null)
 
   const [range, setRange] = useState<RangeDays>(30)
   // Keep a cache per range so switching tabs doesn't re-fetch what we
@@ -99,9 +104,27 @@ export default function DashboardPage() {
       .finally(() => setActivityLoading(false))
   }, [])
 
+  const checkWaConnection = useCallback(async () => {
+    try {
+      const res = await fetch('/api/whatsapp/config')
+      const data = await res.json()
+      setWaConnected(!!data.connected)
+    } catch {
+      setWaConnected(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadAll()
-  }, [loadAll])
+    checkWaConnection()
+    const connected = searchParams.get('connected')
+    const oauthError = searchParams.get('oauth_error')
+    if (connected === 'true') {
+      toast.success('WhatsApp Business Account successfully connected via Facebook!')
+    } else if (oauthError) {
+      toast.error(`WhatsApp connection error: ${oauthError}`)
+    }
+  }, [loadAll, checkWaConnection, searchParams])
 
   // Range switch handler — kept in an event callback (not an effect)
   // so the setState calls stay out of the react-hooks/set-state-in-effect
@@ -123,6 +146,11 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
+      {/* SandeshAI-style WhatsApp Setup Guide */}
+      {waConnected === false && (
+        <WhatsAppSetupGuide isConnected={false} onRefresh={checkWaConnection} />
+      )}
+
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
