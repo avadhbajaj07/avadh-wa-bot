@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
-import { Loader2, FileText, ArrowRight } from 'lucide-react';
+import { Loader2, FileText, ArrowRight, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
 
 const categoryColors: Record<string, string> = {
@@ -25,31 +26,55 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      // Only APPROVED templates can be sent via Meta — anything else
+      // would 400 at broadcast time. Hide them rather than letting
+      // the user pick a template that will fail.
+      const { data, error: fetchError } = await supabase
+        .from('message_templates')
+        .select('*')
+        .eq('status', 'APPROVED')
+        .order('created_at', { ascending: false });
+
+      if (fetchError) throw fetchError;
+      setTemplates(data ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('chooseTemplate.errorLoad'));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
 
   useEffect(() => {
-    async function fetchTemplates() {
-      try {
-        const supabase = createClient();
-        // Only APPROVED templates can be sent via Meta — anything else
-        // would 400 at broadcast time. Hide them rather than letting
-        // the user pick a template that will fail.
-        const { data, error: fetchError } = await supabase
-          .from('message_templates')
-          .select('*')
-          .eq('status', 'APPROVED')
-          .order('created_at', { ascending: false });
-
-        if (fetchError) throw fetchError;
-        setTemplates(data ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t('chooseTemplate.errorLoad'));
-      } finally {
-        setLoading(false);
-      }
-    }
-
     fetchTemplates();
-  }, []);
+  }, [fetchTemplates]);
+
+  async function handleSyncTemplates() {
+    setSyncing(true);
+    try {
+      const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || `Sync failed (HTTP ${res.status})`);
+      }
+      toast.success(
+        `Synced ${data.total} template${data.total === 1 ? '' : 's'} from WhatsApp` +
+          (data.inserted || data.updated
+            ? ` (${data.inserted || 0} new, ${data.updated || 0} updated)`
+            : '')
+      );
+      await fetchTemplates();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to sync templates';
+      toast.error(msg);
+    } finally {
+      setSyncing(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -69,11 +94,24 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">{t('chooseTemplate.title')}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t('chooseTemplate.subtitle')}
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">{t('chooseTemplate.title')}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('chooseTemplate.subtitle')}
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleSyncTemplates}
+          disabled={syncing}
+          className="border-border text-xs text-muted-foreground hover:bg-muted hover:text-foreground shrink-0"
+          title="Sync approved templates from WhatsApp Business Manager"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
+          {syncing ? 'Syncing...' : 'Sync Templates'}
+        </Button>
       </div>
 
       {templates.length === 0 ? (
@@ -81,6 +119,16 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
           <FileText className="mb-2 h-8 w-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">{t('chooseTemplate.noTemplates')}</p>
           <p className="mt-1 text-xs text-muted-foreground">{t('chooseTemplate.createFirst')}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSyncTemplates}
+            disabled={syncing}
+            className="mt-3 border-border text-xs"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Syncing...' : 'Sync Templates from WhatsApp'}
+          </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

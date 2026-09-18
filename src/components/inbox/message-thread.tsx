@@ -665,12 +665,13 @@ export function MessageThread({
       values: {
         body: string[];
         headerText?: string;
+        headerMediaUrl?: string;
         buttonParams?: Record<number, string>;
       },
     ) => {
       if (!conversation) return;
 
-      const renderedBody = renderTemplateBody(template.body_text, values.body);
+      const renderedBody = renderTemplateBody(template.body_text || "", values.body);
       const tempId = `temp-${Date.now()}`;
 
       const optimisticMsg: Message = {
@@ -680,6 +681,7 @@ export function MessageThread({
         content_type: "template",
         content_text: renderedBody,
         template_name: template.name,
+        media_url: values.headerMediaUrl || undefined,
         status: "sending",
         created_at: new Date().toISOString(),
       };
@@ -701,9 +703,11 @@ export function MessageThread({
             template_message_params: {
               body: values.body,
               headerText: values.headerText,
+              headerMediaUrl: values.headerMediaUrl,
               buttonParams: values.buttonParams,
             },
             template_params: values.body,
+            media_url: values.headerMediaUrl,
             content_text: renderedBody,
           }),
         });

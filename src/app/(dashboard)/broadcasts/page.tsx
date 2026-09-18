@@ -13,7 +13,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Radio, Plus, Loader2 } from 'lucide-react';
+import { Radio, Plus, Loader2, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
 import { getBroadcastStatus } from '@/lib/broadcast-status';
@@ -66,8 +67,32 @@ export default function BroadcastsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [syncingTemplates, setSyncingTemplates] = useState(false);
+
   // Used to kick off polling only while something is actively sending.
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function handleSyncTemplates() {
+    setSyncingTemplates(true);
+    try {
+      const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || `Sync failed (HTTP ${res.status})`);
+      }
+      toast.success(
+        `Synced ${data.total} template${data.total === 1 ? '' : 's'} from WhatsApp` +
+          (data.inserted || data.updated
+            ? ` (${data.inserted || 0} new, ${data.updated || 0} updated)`
+            : '')
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to sync templates';
+      toast.error(msg);
+    } finally {
+      setSyncingTemplates(false);
+    }
+  }
 
   async function fetchBroadcasts() {
     try {
@@ -187,15 +212,28 @@ export default function BroadcastsPage() {
             {t('subtitle')}
           </p>
         </div>
-        <GatedButton
-          canAct={canCreate}
-          gateReason="create broadcasts"
-          onClick={() => router.push('/broadcasts/new')}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" />
-          {t('newBroadcast')}
-        </GatedButton>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSyncTemplates}
+            disabled={syncingTemplates}
+            className="border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="Sync approved templates from WhatsApp Business Manager"
+          >
+            <RefreshCw className={`h-4 w-4 mr-1.5 ${syncingTemplates ? 'animate-spin' : ''}`} />
+            {syncingTemplates ? 'Syncing...' : 'Sync Templates'}
+          </Button>
+          <GatedButton
+            canAct={canCreate}
+            gateReason="create broadcasts"
+            onClick={() => router.push('/broadcasts/new')}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            {t('newBroadcast')}
+          </GatedButton>
+        </div>
       </div>
 
       {broadcasts.length === 0 ? (

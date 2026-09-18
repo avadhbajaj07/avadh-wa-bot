@@ -11,6 +11,15 @@ import {
   TemplatePicker,
   type TemplateSendValues,
 } from '@/components/inbox/template-picker';
+import { renderTemplateBody } from '@/lib/whatsapp/template-body';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import {
   Sheet,
   SheetContent,
@@ -325,6 +334,30 @@ export function ContactDetailView({
     setSavingCustom(false);
   }
 
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deletingContact, setDeletingContact] = useState(false);
+
+  async function handleDeleteContact() {
+    if (!contactId) return;
+    setDeletingContact(true);
+    try {
+      const { error } = await supabase
+        .from('contacts')
+        .delete()
+        .eq('id', contactId);
+      if (error) throw error;
+      toast.success(t('actions.delete') ? `${contact?.name || 'Contact'} deleted` : 'Contact deleted');
+      setDeleteConfirmOpen(false);
+      onOpenChange(false);
+      onUpdated();
+    } catch (err) {
+      console.error('Failed to delete contact:', err);
+      toast.error('Failed to delete contact');
+    } finally {
+      setDeletingContact(false);
+    }
+  }
+
   async function handleSendTemplate(
     template: MessageTemplate,
     values: TemplateSendValues,
@@ -332,6 +365,7 @@ export function ContactDetailView({
     if (!contactId) return;
     setSendingTemplate(true);
     try {
+      const renderedBody = renderTemplateBody(template.body_text || '', values.body);
       const res = await fetch('/api/whatsapp/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -345,9 +379,12 @@ export function ContactDetailView({
           template_message_params: {
             body: values.body,
             headerText: values.headerText,
+            headerMediaUrl: values.headerMediaUrl,
             buttonParams: values.buttonParams,
           },
           template_params: values.body,
+          media_url: values.headerMediaUrl,
+          content_text: renderedBody,
         }),
       });
 
@@ -433,7 +470,7 @@ export function ContactDetailView({
                   </div>
                 </div>
               </div>
-              <div className="mt-3">
+              <div className="mt-3 flex items-center justify-between gap-2">
                 <Button
                   size="sm"
                   onClick={() => setTemplatePickerOpen(true)}
@@ -446,6 +483,15 @@ export function ContactDetailView({
                     <LayoutTemplate className="size-4" />
                   )}
                   {t('sendTemplateBtn')}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setDeleteConfirmOpen(true)}
+                  className="border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                >
+                  <Trash2 className="size-4" />
+                  {t('actions.delete') || 'Delete'}
                 </Button>
               </div>
             </SheetHeader>
@@ -755,6 +801,38 @@ export function ContactDetailView({
       onOpenChange={setTemplatePickerOpen}
       onSelect={handleSendTemplate}
     />
+    <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+      <DialogContent className="border-border bg-popover sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-foreground">Delete Contact</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            Are you sure you want to delete {contact?.name || contact?.phone || 'this contact'}? This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setDeleteConfirmOpen(false)}
+            className="border-border text-foreground hover:bg-muted"
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={handleDeleteContact}
+            disabled={deletingContact}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            {deletingContact ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }

@@ -1,11 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import type { Contact, Tag, ContactTag } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -39,6 +42,7 @@ import {
   Search,
   Plus,
   Upload,
+  Download,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -49,6 +53,9 @@ import {
   SlidersHorizontal,
   Filter,
   X,
+  MessageSquare,
+  Sparkles,
+  CheckSquare,
 } from 'lucide-react';
 import { ContactForm } from '@/components/contacts/contact-form';
 import { ContactDetailView } from '@/components/contacts/contact-detail-view';
@@ -62,10 +69,13 @@ const PAGE_SIZE = 25;
 
 interface ContactWithTags extends Contact {
   tags?: Tag[];
+  conversationId?: string | null;
+  hasMessages?: boolean;
 }
 
 export default function ContactsPage() {
   const t = useTranslations('Contacts.page');
+  const router = useRouter();
   const supabase = createClient();
   const canEdit = useCan('send-messages');
   const canEditSettings = useCan('edit-settings');
@@ -75,6 +85,15 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  // Status filter: all | active (has conversation) | unused (never contacted)
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'unused'>('all');
+  const [unusedStats, setUnusedStats] = useState<{ count: number; ids: string[] }>({
+    count: 0,
+    ids: [],
+  });
+  const [cleanUpModalOpen, setCleanUpModalOpen] = useState(false);
+  const [cleaningUp, setCleaningUp] = useState(false);
+
   // Tag filter — contacts shown must have ANY of these tags (OR).
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
 
@@ -90,9 +109,10 @@ export default function ContactsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Bulk selection (page-scoped — only the loaded rows are selectable)
+  // Bulk selection (page-scoped or all-matching)
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
 
   // All tags for display
   const [tagsMap, setTagsMap] = useState<Record<string, Tag>>({});
@@ -118,6 +138,21 @@ export default function ContactsPage() {
     }
   }, [supabase]);
 
+  const fetchUnusedStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/contacts/unused');
+      if (res.ok) {
+        const data = await res.json();
+        setUnusedStats({
+          count: data.count || 0,
+          ids: data.ids || [],
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch unused stats:', err);
+    }
+  }, []);
+
   const fetchContacts = useCallback(async () => {
     const seq = ++fetchSeq.current;
     setLoading(true);
@@ -130,21 +165,19 @@ export default function ContactsPage() {
     const to = from + PAGE_SIZE - 1;
     const term = search.trim();
 
-    let contactRows: Contact[];
-    let count: number;
+    let contactRows: Contact[] = [];
+    let count: number = 0;
 
     if (selectedTagIds.length > 0) {
       // Tag filter active — resolve it server-side (join + distinct +
-      // windowed total count + pagination) so a tag covering many
-      // contacts can't silently truncate the result or overflow an IN
-      // clause. See migration 025_filter_contacts_by_tags.
+      // windowed total count + pagination)
       const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
         p_tag_ids: selectedTagIds,
         p_search: term || null,
         p_limit: PAGE_SIZE,
         p_offset: from,
       });
-      if (seq !== fetchSeq.current) return; // superseded by a newer fetch
+      if (seq !== fetchSeq.current) return;
       if (error) {
         toast.error(t('toastFailedLoad'));
         setLoading(false);
@@ -153,6 +186,109 @@ export default function ContactsPage() {
       const rows = (data ?? []) as { contact: Contact; total_count: number }[];
       contactRows = rows.map((r) => r.contact);
       count = rows.length > 0 ? Number(rows[0].total_count) : 0;
+    } else if (statusFilter === 'unused') {
+      let uIds = unusedStats.ids;
+      if (uIds.length === 0 && unusedStats.count === 0) {
+        try {
+          const res = await fetch('/api/contacts/unused');
+          if (res.ok) {
+            const data = await res.json();
+            uIds = data.ids || [];
+            setUnusedStats(data);
+          }
+        } catch {}
+      }
+
+      if (uIds.length === 0) {
+        contactRows = [];
+        count = 0;
+      } else if (term) {
+        const like = `%${term}%`;
+        const { data, count: matchCount, error } = await supabase
+          .from('contacts')
+          .select('*', { count: 'exact' })
+          .in('id', uIds)
+          .or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`)
+          .order('created_at', { ascending: false })
+          .range(from, to);
+        if (seq !== fetchSeq.current) return;
+        if (error) {
+          toast.error(t('toastFailedLoad'));
+          setLoading(false);
+          return;
+        }
+        contactRows = data ?? [];
+        count = matchCount ?? 0;
+      } else {
+        const pageIds = uIds.slice(from, to + 1);
+        count = uIds.length;
+        if (pageIds.length > 0) {
+          const { data, error } = await supabase
+            .from('contacts')
+            .select('*')
+            .in('id', pageIds)
+            .order('created_at', { ascending: false });
+          if (seq !== fetchSeq.current) return;
+          if (error) {
+            toast.error(t('toastFailedLoad'));
+            setLoading(false);
+            return;
+          }
+          contactRows = data ?? [];
+        } else {
+          contactRows = [];
+        }
+      }
+    } else if (statusFilter === 'active') {
+      const { data: convsWithMsgs } = await supabase
+        .from('conversations')
+        .select('contact_id')
+        .or('last_message_at.not.is.null,last_message_text.not.is.null');
+
+      const activeIds = Array.from(
+        new Set((convsWithMsgs ?? []).map((c) => c.contact_id).filter(Boolean) as string[])
+      );
+
+      if (activeIds.length === 0) {
+        contactRows = [];
+        count = 0;
+      } else if (term) {
+        const like = `%${term}%`;
+        const { data, count: matchCount, error } = await supabase
+          .from('contacts')
+          .select('*', { count: 'exact' })
+          .in('id', activeIds)
+          .or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`)
+          .order('created_at', { ascending: false })
+          .range(from, to);
+        if (seq !== fetchSeq.current) return;
+        if (error) {
+          toast.error(t('toastFailedLoad'));
+          setLoading(false);
+          return;
+        }
+        contactRows = data ?? [];
+        count = matchCount ?? 0;
+      } else {
+        const pageIds = activeIds.slice(from, to + 1);
+        count = activeIds.length;
+        if (pageIds.length > 0) {
+          const { data, error } = await supabase
+            .from('contacts')
+            .select('*')
+            .in('id', pageIds)
+            .order('created_at', { ascending: false });
+          if (seq !== fetchSeq.current) return;
+          if (error) {
+            toast.error(t('toastFailedLoad'));
+            setLoading(false);
+            return;
+          }
+          contactRows = data ?? [];
+        } else {
+          contactRows = [];
+        }
+      }
     } else {
       let query = supabase
         .from('contacts')
@@ -166,7 +302,7 @@ export default function ContactsPage() {
       }
 
       const { data, count: exactCount, error } = await query;
-      if (seq !== fetchSeq.current) return; // superseded by a newer fetch
+      if (seq !== fetchSeq.current) return;
       if (error) {
         toast.error(t('toastFailedLoad'));
         setLoading(false);
@@ -184,18 +320,33 @@ export default function ContactsPage() {
       return;
     }
 
-    // Fetch tags for these contacts
+    // Fetch tags and conversations for these contacts in parallel
     const contactIds = contactRows.map((c) => c.id);
-    const { data: contactTags } = await supabase
-      .from('contact_tags')
-      .select('contact_id, tag_id')
-      .in('contact_id', contactIds);
-    if (seq !== fetchSeq.current) return; // superseded by a newer fetch
+    const [tagsRes, convRes] = await Promise.all([
+      supabase
+        .from('contact_tags')
+        .select('contact_id, tag_id')
+        .in('contact_id', contactIds),
+      supabase
+        .from('conversations')
+        .select('id, contact_id, last_message_at, last_message_text')
+        .in('contact_id', contactIds),
+    ]);
+
+    if (seq !== fetchSeq.current) return;
 
     const tagsByContact: Record<string, string[]> = {};
-    contactTags?.forEach((ct) => {
+    tagsRes.data?.forEach((ct) => {
       if (!tagsByContact[ct.contact_id]) tagsByContact[ct.contact_id] = [];
       tagsByContact[ct.contact_id].push(ct.tag_id);
+    });
+
+    const convByContact: Record<string, { id: string; hasMessages: boolean }> = {};
+    convRes.data?.forEach((conv) => {
+      convByContact[conv.contact_id] = {
+        id: conv.id,
+        hasMessages: Boolean(conv.last_message_at || conv.last_message_text),
+      };
     });
 
     const enriched: ContactWithTags[] = contactRows.map((c) => ({
@@ -203,23 +354,20 @@ export default function ContactsPage() {
       tags: (tagsByContact[c.id] ?? [])
         .map((tid) => tagsMap[tid])
         .filter(Boolean),
+      conversationId: convByContact[c.id]?.id ?? null,
+      hasMessages: convByContact[c.id]?.hasMessages ?? false,
     }));
 
     setContacts(enriched);
     setLoading(false);
-  }, [supabase, page, search, selectedTagIds, tagsMap, t]);
+  }, [supabase, page, search, selectedTagIds, statusFilter, unusedStats, tagsMap, t]);
 
-  // Load-once-on-mount-ish data fetches. Each setter inside runs
-  // inside an async promise completion (Supabase await), not
-  // synchronously in the effect body, so the cascade the lint rule
-  // warns about doesn't apply here.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTags();
-  }, [fetchTags]);
+    fetchUnusedStats();
+  }, [fetchTags, fetchUnusedStats]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchContacts();
   }, [fetchContacts]);
 
@@ -263,6 +411,7 @@ export default function ContactsPage() {
     } else {
       toast.success(t('toastDeleted'));
       fetchContacts();
+      fetchUnusedStats();
     }
 
     setDeleting(false);
@@ -273,6 +422,7 @@ export default function ContactsPage() {
   const allOnPageSelected =
     contacts.length > 0 && contacts.every((c) => selected.has(c.id));
   const someOnPageSelected = contacts.some((c) => selected.has(c.id));
+  const isAllMatchingSelected = totalCount > 0 && selected.size === totalCount;
 
   function toggleSelectAll() {
     setSelected((prev) => {
@@ -295,23 +445,213 @@ export default function ContactsPage() {
     });
   }
 
+  const fetchAllContactIds = useCallback(async (): Promise<string[]> => {
+    const term = search.trim();
+
+    if (selectedTagIds.length > 0) {
+      const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
+        p_tag_ids: selectedTagIds,
+        p_search: term || null,
+        p_limit: 10000,
+        p_offset: 0,
+      });
+      if (error) throw error;
+      const rows = (data ?? []) as { contact: Contact }[];
+      return rows.map((r) => r.contact.id);
+    }
+
+    if (statusFilter === 'unused') {
+      let uIds = unusedStats.ids;
+      if (uIds.length === 0 && unusedStats.count > 0) {
+        try {
+          const res = await fetch('/api/contacts/unused');
+          if (res.ok) {
+            const d = await res.json();
+            uIds = d.ids || [];
+          }
+        } catch {}
+      }
+      if (!term) return uIds;
+      const like = `%${term}%`;
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('id')
+        .in('id', uIds)
+        .or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`)
+        .limit(10000);
+      if (error) throw error;
+      return (data ?? []).map((c) => c.id);
+    }
+
+    if (statusFilter === 'active') {
+      const { data: convsWithMsgs } = await supabase
+        .from('conversations')
+        .select('contact_id')
+        .or('last_message_at.not.is.null,last_message_text.not.is.null');
+
+      const activeIds = Array.from(
+        new Set((convsWithMsgs ?? []).map((c) => c.contact_id).filter(Boolean) as string[])
+      );
+      if (!term) return activeIds;
+      const like = `%${term}%`;
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('id')
+        .in('id', activeIds)
+        .or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`)
+        .limit(10000);
+      if (error) throw error;
+      return (data ?? []).map((c) => c.id);
+    }
+
+    let q = supabase.from('contacts').select('id');
+    if (term) {
+      const like = `%${term}%`;
+      q = q.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+    }
+    const { data, error } = await q.limit(10000);
+    if (error) throw error;
+    return (data ?? []).map((c) => c.id);
+  }, [supabase, search, selectedTagIds, statusFilter, unusedStats]);
+
+  async function handleSelectAllToggle() {
+    if (selected.size === totalCount && totalCount > 0) {
+      setSelected(new Set());
+      return;
+    }
+
+    setSelectingAll(true);
+    try {
+      if (totalCount <= contacts.length) {
+        setSelected(new Set(contacts.map((c) => c.id)));
+        return;
+      }
+
+      const allIds = await fetchAllContactIds();
+      setSelected(new Set(allIds));
+      toast.success(`Selected all ${allIds.length} contacts`);
+    } catch (err) {
+      console.error('Failed to select all contacts:', err);
+      setSelected(new Set(contacts.map((c) => c.id)));
+    } finally {
+      setSelectingAll(false);
+    }
+  }
+
+  async function handleSelectAllMatching() {
+    setSelectingAll(true);
+    try {
+      const allIds = await fetchAllContactIds();
+      setSelected(new Set(allIds));
+      toast.success(`Selected all ${allIds.length} contacts`);
+    } catch (err) {
+      console.error('Failed to select all contacts:', err);
+      toast.error('Could not select all contacts');
+    } finally {
+      setSelectingAll(false);
+    }
+  }
+
   async function handleBulkDelete() {
     const ids = [...selected];
     if (ids.length === 0) return;
     setDeleting(true);
 
-    const { error } = await supabase.from('contacts').delete().in('id', ids);
+    try {
+      // Safe batch deletion to prevent statement/URL length limits
+      const BATCH_SIZE = 100;
+      let deleted = 0;
+      for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+        const batch = ids.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase.from('contacts').delete().in('id', batch);
+        if (error) throw error;
+        deleted += batch.length;
+      }
 
-    if (error) {
-      toast.error(t('toastBulkFailedDelete'));
-    } else {
-      toast.success(t('toastBulkDeleted', { count: ids.length }));
+      toast.success(t('toastBulkDeleted', { count: deleted }));
       setSelected(new Set());
       fetchContacts();
+      fetchUnusedStats();
+    } catch (err) {
+      console.error('Failed to bulk delete contacts:', err);
+      toast.error(t('toastBulkFailedDelete'));
+    } finally {
+      setDeleting(false);
+      setBulkDeleteOpen(false);
     }
+  }
 
-    setDeleting(false);
-    setBulkDeleteOpen(false);
+  async function handleCleanUpUnused() {
+    setCleaningUp(true);
+    try {
+      const res = await fetch('/api/contacts/unused', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to delete unused contacts');
+      }
+      toast.success(
+        data.deletedCount > 0
+          ? `Deleted ${data.deletedCount} unused contacts`
+          : 'No unused contacts to delete'
+      );
+      setCleanUpModalOpen(false);
+      await fetchUnusedStats();
+      fetchContacts();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to clean up unused contacts';
+      toast.error(msg);
+    } finally {
+      setCleaningUp(false);
+    }
+  }
+
+  async function handleExportCsv() {
+    try {
+      toast.info('Preparing contacts export...');
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('name, phone, email, company, created_at')
+        .order('created_at', { ascending: false })
+        .limit(10000);
+
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        toast.error('No contacts to export');
+        return;
+      }
+
+      const headers = ['Name', 'Phone', 'Email', 'Company', 'Created At'];
+      const rows = data.map((c) => [
+        `"${(c.name || '').replace(/"/g, '""')}"`,
+        `"${(c.phone || '').replace(/"/g, '""')}"`,
+        `"${(c.email || '').replace(/"/g, '""')}"`,
+        `"${(c.company || '').replace(/"/g, '""')}"`,
+        `"${new Date(c.created_at).toISOString()}"`,
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `contacts-${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${data.length} contacts`);
+    } catch (err) {
+      console.error('Export error:', err);
+      toast.error('Failed to export contacts');
+    }
+  }
+
+  function handleStatusFilterChange(filter: 'all' | 'active' | 'unused') {
+    setStatusFilter(filter);
+    setPage(0);
   }
 
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
@@ -323,7 +663,7 @@ export default function ContactsPage() {
   const allTags = Object.values(tagsMap).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
-  const hasActiveFilters = search.trim().length > 0 || selectedTagIds.length > 0;
+  const hasActiveFilters = search.trim().length > 0 || selectedTagIds.length > 0 || statusFilter !== 'all';
 
   function toggleTagFilter(tagId: string) {
     setSelectedTagIds((prev) =>
@@ -349,38 +689,115 @@ export default function ContactsPage() {
             {totalCount > 0 ? t('subtitle', { count: totalCount }) : t('subtitleZero')}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {unusedStats.count > 0 && (
+            <GatedButton
+              variant="outline"
+              size="sm"
+              canAct={canEdit}
+              gateReason="delete contacts"
+              onClick={() => setCleanUpModalOpen(true)}
+              className="border-red-500/30 text-red-500 hover:bg-red-500/10 hover:text-red-600"
+            >
+              <Trash2 className="size-3.5" />
+              Clean Up Unused ({unusedStats.count})
+            </GatedButton>
+          )}
           {canEditSettings && (
             <Button
               variant="outline"
+              size="sm"
               onClick={() => setCustomFieldsOpen(true)}
               className="border-border text-muted-foreground hover:bg-muted"
             >
-              <SlidersHorizontal className="size-4" />
+              <SlidersHorizontal className="size-3.5" />
               {t('customFieldsBtn')}
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportCsv}
+            className="border-border text-muted-foreground hover:bg-muted"
+          >
+            <Download className="size-3.5" />
+            Export CSV
+          </Button>
           <GatedButton
             variant="outline"
+            size="sm"
             canAct={canEdit}
             gateReason="add or import contacts"
             onClick={() => setImportOpen(true)}
             className="border-border text-muted-foreground hover:bg-muted"
           >
-            <Upload className="size-4" />
+            <Upload className="size-3.5" />
             {t('importBtn')}
           </GatedButton>
           <GatedButton
+            size="sm"
             canAct={canEdit}
             gateReason="add or import contacts"
             onClick={openAddForm}
             className="bg-primary hover:bg-primary/90 text-primary-foreground"
           >
-            <Plus className="size-4" />
+            <Plus className="size-3.5" />
             {t('addContactBtn')}
           </GatedButton>
         </div>
       </div>
+
+      {/* Status Filter Tabs */}
+      <Tabs
+        value={statusFilter}
+        onValueChange={(val) => handleStatusFilterChange(val as 'all' | 'active' | 'unused')}
+        className="w-full"
+      >
+        <TabsList className="bg-muted/50 border border-border">
+          <TabsTrigger value="all" className="text-xs">
+            All Contacts
+            {statusFilter === 'all' && totalCount > 0 && (
+              <span className="ml-1.5 rounded-full bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                {totalCount}
+              </span>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="active" className="text-xs">
+            Active (Has Chat)
+          </TabsTrigger>
+          <TabsTrigger value="unused" className="text-xs flex items-center gap-1.5">
+            <span>Unused</span>
+            {unusedStats.count > 0 && (
+              <span className="rounded-full bg-muted-foreground/20 px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                {unusedStats.count}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {/* Unused filter helper banner */}
+      {statusFilter === 'unused' && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-800 dark:text-amber-300">
+          <div className="flex items-center gap-2">
+            <Sparkles className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span>
+              Showing contacts that have never had any conversation or messages exchanged, and have no active deals.
+            </span>
+          </div>
+          {unusedStats.count > 0 && canEdit && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setCleanUpModalOpen(true)}
+              className="h-7 shrink-0 text-xs border-amber-500/40 text-amber-900 dark:text-amber-200 hover:bg-amber-500/20"
+            >
+              <Trash2 className="size-3 mr-1" />
+              Delete all {unusedStats.count} unused
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Search + tag filter */}
       <div className="space-y-2">
@@ -460,6 +877,33 @@ export default function ContactsPage() {
               )}
             </PopoverContent>
           </Popover>
+
+          {/* 1-Click Select All Button */}
+          {totalCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSelectAllToggle}
+              disabled={loading || selectingAll}
+              className={`border-border text-xs shrink-0 ${
+                isAllMatchingSelected
+                  ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+              title="Select all contacts in one click"
+            >
+              {selectingAll ? (
+                <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <CheckSquare className="size-3.5 mr-1.5" />
+              )}
+              {isAllMatchingSelected
+                ? `Deselect All (${selected.size})`
+                : selected.size > 0
+                ? `Select All (${totalCount})`
+                : `Select All (${totalCount})`}
+            </Button>
+          )}
         </div>
 
         {/* Active tag-filter chips */}
@@ -500,16 +944,39 @@ export default function ContactsPage() {
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
-        <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/40 px-4 py-2">
-          <p className="text-sm text-foreground">
-            {t('selectedCount', { count: selected.size })}
-          </p>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium text-foreground">
+              {t('selectedCount', { count: selected.size })}
+              {isAllMatchingSelected && (
+                <span className="ml-1.5 text-xs text-primary font-semibold">
+                  (all {totalCount} contacts selected)
+                </span>
+              )}
+            </p>
+            {totalCount > contacts.length && !isAllMatchingSelected && (
+              <button
+                type="button"
+                onClick={handleSelectAllMatching}
+                disabled={selectingAll}
+                className="text-xs font-semibold text-primary underline hover:text-primary/80 transition-colors ml-1"
+              >
+                {selectingAll ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Loader2 className="size-3 animate-spin" /> Selecting all...
+                  </span>
+                ) : (
+                  `Select all ${totalCount} contacts in 1 click`
+                )}
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setSelected(new Set())}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground hover:text-foreground h-8 text-xs"
             >
               {t('clearSelection')}
             </Button>
@@ -519,9 +986,10 @@ export default function ContactsPage() {
               canAct={canEdit}
               gateReason="delete contacts"
               onClick={() => setBulkDeleteOpen(true)}
+              className="h-8 text-xs font-medium"
             >
-              <Trash2 className="size-4" />
-              {t('deleteSelected')}
+              <Trash2 className="size-3.5 mr-1" />
+              Bulk Delete ({selected.size})
             </GatedButton>
           </div>
         </div>
@@ -543,17 +1011,18 @@ export default function ContactsPage() {
               </TableHead>
               <TableHead className="text-muted-foreground">{t('tableColumns.name')}</TableHead>
               <TableHead className="text-muted-foreground">{t('tableColumns.phone')}</TableHead>
+              <TableHead className="text-muted-foreground">Status</TableHead>
               <TableHead className="text-muted-foreground hidden md:table-cell">{t('tableColumns.email')}</TableHead>
               <TableHead className="text-muted-foreground hidden lg:table-cell">{t('tableColumns.company')}</TableHead>
               <TableHead className="text-muted-foreground hidden md:table-cell">{t('tableColumns.tags')}</TableHead>
               <TableHead className="text-muted-foreground hidden lg:table-cell">{t('tableColumns.createdAt')}</TableHead>
-              <TableHead className="text-muted-foreground w-12" />
+              <TableHead className="text-muted-foreground w-16 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow className="border-border">
-                <TableCell colSpan={8} className="text-center py-12">
+                <TableCell colSpan={9} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <Loader2 className="size-6 animate-spin text-primary" />
                     <p className="text-sm text-muted-foreground">{t('loading')}</p>
@@ -562,7 +1031,7 @@ export default function ContactsPage() {
               </TableRow>
             ) : contacts.length === 0 ? (
               <TableRow className="border-border">
-                <TableCell colSpan={8} className="text-center py-12">
+                <TableCell colSpan={9} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <Users className="size-8 text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">
@@ -606,6 +1075,25 @@ export default function ContactsPage() {
                   <TableCell className="text-muted-foreground font-mono text-xs">
                     {contact.phone}
                   </TableCell>
+                  <TableCell>
+                    {contact.hasMessages ? (
+                      <Badge
+                        variant="outline"
+                        className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-medium inline-flex items-center gap-1"
+                      >
+                        <span className="size-1.5 rounded-full bg-emerald-500 shrink-0" />
+                        Active
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="border-border bg-muted/40 text-muted-foreground text-[10px] font-medium inline-flex items-center gap-1"
+                      >
+                        <span className="size-1.5 rounded-full bg-muted-foreground/50 shrink-0" />
+                        Unused
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground hidden md:table-cell text-sm">
                     {contact.email || <span className="text-muted-foreground">-</span>}
                   </TableCell>
@@ -644,47 +1132,71 @@ export default function ContactsPage() {
                       year: 'numeric',
                     })}
                   </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className="text-muted-foreground hover:text-foreground"
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        }
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground hover:text-primary hover:bg-muted"
+                        title={contact.conversationId ? "Open chat in Inbox" : "Start chat"}
+                        onClick={() => {
+                          if (contact.conversationId) {
+                            router.push(`/inbox?c=${contact.conversationId}`);
+                          } else {
+                            openDetail(contact.id);
+                          }
+                        }}
                       >
-                        <MoreHorizontal className="size-4" />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent
-                        align="end"
-                        className="bg-popover border-border"
-                      >
-                        <DropdownMenuItem
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditForm(contact);
-                          }}
-                          className="text-popover-foreground focus:bg-muted focus:text-foreground"
+                        <MessageSquare className="size-3.5" />
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-muted-foreground hover:text-foreground"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          }
                         >
-                          <Pencil className="size-4" />
-                          {t('editAction')}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator className="bg-border" />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            confirmDelete(contact);
-                          }}
+                          <MoreHorizontal className="size-4" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          className="bg-popover border-border"
                         >
-                          <Trash2 className="size-4" />
-                          {t('deleteAction')}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                          <DropdownMenuItem
+                            onClick={() => {
+                              if (contact.conversationId) {
+                                router.push(`/inbox?c=${contact.conversationId}`);
+                              } else {
+                                openDetail(contact.id);
+                              }
+                            }}
+                            className="text-popover-foreground focus:bg-muted focus:text-foreground"
+                          >
+                            <MessageSquare className="size-4 mr-2" />
+                            {contact.conversationId ? "Open chat" : "Start chat"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => openEditForm(contact)}
+                            className="text-popover-foreground focus:bg-muted focus:text-foreground"
+                          >
+                            <Pencil className="size-4 mr-2" />
+                            {t('editAction')}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator className="bg-border" />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onClick={() => confirmDelete(contact)}
+                          >
+                            <Trash2 className="size-4 mr-2" />
+                            {t('deleteAction')}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -750,7 +1262,10 @@ export default function ContactsPage() {
         open={detailOpen}
         onOpenChange={setDetailOpen}
         contactId={detailContactId}
-        onUpdated={fetchContacts}
+        onUpdated={() => {
+          fetchContacts();
+          fetchUnusedStats();
+        }}
       />
 
       {/* Import Modal */}
@@ -822,7 +1337,44 @@ export default function ContactsPage() {
               disabled={deleting}
             >
               {deleting && <Loader2 className="size-4 animate-spin" />}
-              {t('deleteBtn')}
+              {t('deleteBtn')} ({selected.size})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Clean Up Unused Contacts Dialog */}
+      <Dialog open={cleanUpModalOpen} onOpenChange={setCleanUpModalOpen}>
+        <DialogContent className="bg-popover border-border text-popover-foreground sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-popover-foreground flex items-center gap-2">
+              <Trash2 className="size-4 text-red-500" />
+              Clean Up Unused Contacts
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              This will permanently delete all contacts that have never sent or received messages and have no active deals in the pipeline.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2 text-sm text-muted-foreground">
+            <p>
+              Found <strong className="text-foreground">{unusedStats.count}</strong> unused contact{unusedStats.count === 1 ? '' : 's'}. This action cannot be undone.
+            </p>
+          </div>
+          <DialogFooter className="bg-popover border-border">
+            <Button
+              variant="outline"
+              onClick={() => setCleanUpModalOpen(false)}
+              className="border-border text-muted-foreground hover:bg-muted"
+            >
+              {t('cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCleanUpUnused}
+              disabled={cleaningUp || unusedStats.count === 0}
+            >
+              {cleaningUp && <Loader2 className="size-4 animate-spin" />}
+              Delete {unusedStats.count} Contact{unusedStats.count === 1 ? '' : 's'}
             </Button>
           </DialogFooter>
         </DialogContent>
