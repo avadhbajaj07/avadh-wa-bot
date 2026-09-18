@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { requireRole, toErrorResponse } from '@/lib/auth/account';
 
 /**
@@ -7,7 +8,7 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account';
  * 1. It has no conversations with messages (last_message_at IS NOT NULL or last_message_text IS NOT NULL).
  * 2. It has no deals attached.
  */
-async function getUnusedContactIds(supabase: any, accountId: string): Promise<string[]> {
+async function getUnusedContactIds(supabase: SupabaseClient, accountId: string): Promise<string[]> {
   // 1. Get contact IDs with active conversations
   const { data: convData } = await supabase
     .from('conversations')

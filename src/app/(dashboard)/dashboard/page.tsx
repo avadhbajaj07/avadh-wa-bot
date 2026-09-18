@@ -104,18 +104,16 @@ export default function DashboardPage() {
       .finally(() => setActivityLoading(false))
   }, [])
 
-  const checkWaConnection = useCallback(async () => {
-    try {
-      const res = await fetch('/api/whatsapp/config')
-      const data = await res.json()
-      setWaConnected(!!data.connected)
-    } catch {
-      setWaConnected(false)
-    }
+  const checkWaConnection = useCallback(() => {
+    void fetch('/api/whatsapp/config')
+      .then((res) => res.json())
+      .then((data) => setWaConnected(!!data.connected))
+      .catch(() => setWaConnected(false))
   }, [])
 
   useEffect(() => {
     loadAll()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     checkWaConnection()
     const connected = searchParams.get('connected')
     const oauthError = searchParams.get('oauth_error')
