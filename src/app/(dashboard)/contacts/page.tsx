@@ -811,20 +811,20 @@ export default function ContactsPage() {
             canAct={canEdit}
             gateReason="add or import contacts"
             onClick={() => setImportOpen(true)}
-            className="border-border text-muted-foreground hover:bg-muted"
+            className="border-primary/40 text-primary hover:bg-primary/5 font-semibold text-xs"
           >
-            <Upload className="size-3.5" />
-            {t('importBtn')}
+            <Upload className="size-3.5 mr-1" />
+            Import Contacts
           </GatedButton>
           <GatedButton
             size="sm"
             canAct={canEdit}
             gateReason="add or import contacts"
             onClick={openAddForm}
-            className="bg-primary hover:bg-primary/90 text-primary-foreground"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs shadow-xs"
           >
-            <Plus className="size-3.5" />
-            {t('addContactBtn')}
+            <Plus className="size-3.5 mr-1" />
+            + Add Contact
           </GatedButton>
         </div>
       </div>
@@ -883,21 +883,29 @@ export default function ContactsPage() {
 
       {/* Search + tag filter */}
       <div className="space-y-2">
-        <div className="flex flex-col sm:flex-row gap-2">
-          <div className="relative w-full max-w-sm">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                // Reset pagination when the query changes — the result
-                // set shrinks/grows, page N may no longer be valid.
-                setPage(0);
-              }}
-              placeholder={t('searchPlaceholder')}
-              className="pl-8 bg-card border-border text-foreground placeholder:text-muted-foreground"
-            />
-          </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2 flex-1">
+            <div className="relative w-full max-w-xs">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  // Reset pagination when the query changes — the result
+                  // set shrinks/grows, page N may no longer be valid.
+                  setPage(0);
+                }}
+                placeholder="Search by name or number"
+                className="pl-8 bg-card border-border text-foreground placeholder:text-muted-foreground text-xs h-9"
+              />
+            </div>
+            <Button
+              size="sm"
+              onClick={() => fetchContacts()}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold h-9 px-3.5 shadow-xs"
+            >
+              Search
+            </Button>
 
           <Popover>
             <PopoverTrigger
@@ -1001,6 +1009,20 @@ export default function ContactsPage() {
             </GatedButton>
           )}
         </div>
+
+        <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium self-end sm:self-auto shrink-0">
+          <span>{totalCount} Contacts</span>
+          <span className="opacity-40">|</span>
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            className="inline-flex items-center gap-1 hover:text-foreground transition-colors font-semibold text-primary"
+          >
+            <Download className="size-3.5" />
+            Export
+          </button>
+        </div>
+      </div>
 
         {/* Active tag-filter chips */}
         {selectedTagIds.length > 0 && (
@@ -1127,27 +1149,42 @@ export default function ContactsPage() {
               </TableRow>
             ) : contacts.length === 0 ? (
               <TableRow className="border-border">
-                <TableCell colSpan={9} className="text-center py-12">
-                  <div className="flex flex-col items-center gap-2">
-                    <Users className="size-8 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-16">
+                  <div className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                    <div className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-4 shadow-xs">
+                      <Users className="size-8" />
+                    </div>
+                    <h3 className="text-base font-bold text-foreground">
+                      {hasActiveFilters ? t('noContactsMatch') : 'No contacts added yet'}
+                    </h3>
+                    <p className="mt-1.5 text-xs text-muted-foreground">
                       {hasActiveFilters
-                        ? t('noContactsMatch')
-                        : t('noContactsYet')}
+                        ? 'Try adjusting your search query or tag filters.'
+                        : 'Get started by adding your first contact or import contacts from a spreadsheet.'}
                     </p>
-                    {!hasActiveFilters && (
+                    <div className="mt-6 flex items-center justify-center gap-2.5">
+                      <GatedButton
+                        canAct={canEdit}
+                        gateReason="add or import contacts"
+                        size="sm"
+                        onClick={openAddForm}
+                        className="bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold shadow-xs"
+                      >
+                        <Plus className="size-3.5 mr-1" />
+                        + Add New Contact
+                      </GatedButton>
                       <GatedButton
                         canAct={canEdit}
                         gateReason="add or import contacts"
                         variant="outline"
                         size="sm"
-                        onClick={openAddForm}
-                        className="mt-2 border-border text-muted-foreground hover:bg-muted"
+                        onClick={() => setImportOpen(true)}
+                        className="border-border text-xs text-foreground hover:bg-muted"
                       >
-                        <Plus className="size-3.5" />
-                        {t('addFirstContact')}
+                        <Upload className="size-3.5 mr-1" />
+                        Import Contacts
                       </GatedButton>
-                    )}
+                    </div>
                   </div>
                 </TableCell>
               </TableRow>

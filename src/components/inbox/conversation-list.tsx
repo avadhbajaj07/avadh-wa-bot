@@ -9,7 +9,8 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { Search, ChevronDown, X, Filter, Plus, MessageSquare, Zap, User, Users } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
@@ -63,8 +64,10 @@ export function ConversationList({
     { label: t("filterClosed"), value: "closed" },
   ], [t]);
 
+  const { user } = useAuth();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>("all");
+  const [mainTab, setMainTab] = useState<'all' | 'active' | 'my'>('all');
   const [loading, setLoading] = useState(true);
   // Contact-based filters (issue #272). Tags use OR logic (a conversation
   // matches if its contact carries any selected tag), consistent with
@@ -187,8 +190,14 @@ export function ConversationList({
       });
     }
 
+    if (mainTab === 'active') {
+      result = result.filter((c) => c.status === 'open' || c.status === 'pending');
+    } else if (mainTab === 'my') {
+      result = result.filter((c) => c.assigned_agent_id === user?.id);
+    }
+
     return result;
-  }, [conversations, filter, search, selectedTagIds, selectedCompany]);
+  }, [conversations, filter, search, selectedTagIds, selectedCompany, mainTab, user?.id]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) =>
@@ -223,38 +232,44 @@ export function ConversationList({
     // w-full on mobile so the list occupies the whole viewport when it's
     // the single pane showing; fixed 320px on desktop where it shares the
     // row with the thread + contact sidebar.
-    <div className="flex h-full w-full flex-col border-r border-border bg-card lg:w-80">
-      {/* Search + Filter */}
-      <div className="space-y-2 border-b border-border p-3">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={handleSearchChange}
-            placeholder={t("searchPlaceholder")}
-            className="border-border bg-muted pl-9 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50"
-          />
-        </div>
+    <div className="relative flex h-full w-full flex-col border-r border-border bg-card lg:w-80">
+      {/* Chats Header */}
+      <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1">
+        <h2 className="text-base font-bold text-foreground">Chats</h2>
+        <a
+          href="/pipelines"
+          className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+        >
+          <Users className="size-3" />
+          Manage Leads →
+        </a>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-1">
+      {/* Search + Filter */}
+      <div className="space-y-2.5 border-b border-border p-3">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={handleSearchChange}
+              placeholder="Search name or number"
+              className="border-border bg-muted pl-9 text-xs text-foreground placeholder-muted-foreground focus:border-primary/50 h-9"
+            />
+          </div>
+
           <DropdownMenu>
-            <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted">
-                {activeFilter?.label ?? t("filterAll")}
-                <ChevronDown className="h-3 w-3" />
+            <DropdownMenuTrigger className="inline-flex items-center justify-center size-9 shrink-0 text-muted-foreground hover:text-foreground rounded-lg border border-border bg-muted hover:bg-muted/80">
+              <Filter className="size-4" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="border-border bg-popover"
-            >
+            <DropdownMenuContent align="end" className="border-border bg-popover">
               {FILTER_OPTIONS.map((opt) => (
                 <DropdownMenuItem
                   key={opt.value}
                   onClick={() => setFilter(opt.value)}
                   className={cn(
-                    "text-sm",
-                    filter === opt.value
-                      ? "text-primary"
-                      : "text-popover-foreground"
+                    "text-xs",
+                    filter === opt.value ? "text-primary font-semibold" : "text-popover-foreground"
                   )}
                 >
                   {opt.label}
@@ -262,6 +277,52 @@ export function ConversationList({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+        </div>
+
+        {/* SandeshAI Pill Tabs */}
+        <div className="grid grid-cols-3 gap-1 rounded-xl bg-muted/60 p-1">
+          <button
+            type="button"
+            onClick={() => setMainTab('all')}
+            className={cn(
+              "flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition-all",
+              mainTab === 'all'
+                ? "bg-card text-primary shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <MessageSquare className="size-3 text-primary" />
+            <span>All</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMainTab('active')}
+            className={cn(
+              "flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition-all",
+              mainTab === 'active'
+                ? "bg-card text-primary shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Zap className="size-3 text-amber-500" />
+            <span>Active</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setMainTab('my')}
+            className={cn(
+              "flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold transition-all",
+              mainTab === 'my'
+                ? "bg-card text-primary shadow-xs"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <User className="size-3 text-indigo-500" />
+            <span>My Chats</span>
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1">
 
           {tags.length > 0 && (
             <DropdownMenu>
@@ -402,8 +463,14 @@ export function ConversationList({
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="px-4 py-12 text-center">
-            <p className="text-sm text-muted-foreground">{t("noConversations")}</p>
+          <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
+            <div className="flex size-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground mb-3">
+              <MessageSquare className="size-6" />
+            </div>
+            <p className="text-sm font-semibold text-foreground">No chats found</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Try adjusting your search or filters
+            </p>
           </div>
         ) : (
           <div className="flex flex-col">
@@ -419,6 +486,17 @@ export function ConversationList({
           </div>
         )}
       </ScrollArea>
+
+      {/* Floating Start New Chat Button */}
+      <div className="absolute bottom-4 right-4 z-20">
+        <a
+          href="/contacts"
+          title="Start a new chat"
+          className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 hover:scale-105 active:scale-95 transition-all"
+        >
+          <Plus className="size-5" />
+        </a>
+      </div>
     </div>
   );
 }

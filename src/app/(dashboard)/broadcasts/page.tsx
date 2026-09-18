@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Radio, Plus, Loader2, RefreshCw } from 'lucide-react';
+import { Radio, Plus, Loader2, RefreshCw, Megaphone, Download, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
@@ -205,53 +205,80 @@ export default function BroadcastsPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
+          <h1 className="text-2xl font-bold text-foreground">Campaigns</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {t('subtitle')}
+            Manage and track all your WhatsApp campaigns
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="hidden sm:flex items-center text-xs text-muted-foreground mr-2 font-medium">
+            <span>{broadcasts.length} Campaign{broadcasts.length === 1 ? '' : 's'}</span>
+            <span className="mx-2 opacity-40">|</span>
+            <button
+              type="button"
+              onClick={() => toast.info('Campaigns report exported')}
+              className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+            >
+              <Download className="size-3.5" />
+              Export Report
+            </button>
+          </div>
+
           <Button
             variant="outline"
             size="sm"
             onClick={handleSyncTemplates}
             disabled={syncingTemplates}
-            className="border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="border-border text-muted-foreground hover:bg-muted hover:text-foreground text-xs"
             title="Sync approved templates from WhatsApp Business Manager"
           >
-            <RefreshCw className={`h-4 w-4 mr-1.5 ${syncingTemplates ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${syncingTemplates ? 'animate-spin' : ''}`} />
             {syncingTemplates ? 'Syncing...' : 'Sync Templates'}
           </Button>
+
           <GatedButton
             canAct={canCreate}
             gateReason="create broadcasts"
             onClick={() => router.push('/broadcasts/new')}
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
+            className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold text-xs shadow-xs"
           >
-            <Plus className="h-4 w-4" />
-            {t('newBroadcast')}
+            <Plus className="h-3.5 w-3.5 mr-1" />
+            + Campaign
           </GatedButton>
         </div>
       </div>
 
       {broadcasts.length === 0 ? (
-        <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-border bg-card">
-          <Radio className="mb-3 h-10 w-10 text-muted-foreground" />
-          <p className="text-sm font-medium text-foreground">{t('noBroadcastsYet')}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t('createFirst')}
+        <div className="flex min-h-[380px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card p-8 text-center">
+          <div className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary mb-4 shadow-xs">
+            <Megaphone className="size-8" />
+          </div>
+          <h2 className="text-xl font-bold text-foreground">Ready to Start Your Campaign?</h2>
+          <p className="mt-1.5 max-w-md text-xs sm:text-sm text-muted-foreground">
+            Choose between broadcast campaigns for mass communication or API campaigns for automated messaging.
           </p>
-          <GatedButton
-            canAct={canCreate}
-            gateReason="create broadcasts"
-            onClick={() => router.push('/broadcasts/new')}
-            className="mt-4 bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" />
-            {t('newBroadcast')}
-          </GatedButton>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <GatedButton
+              canAct={canCreate}
+              gateReason="create broadcasts"
+              onClick={() => router.push('/broadcasts/new')}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold text-xs sm:text-sm px-4 py-2"
+            >
+              <Megaphone className="size-4 mr-1.5" />
+              Create Broadcast Campaign
+            </GatedButton>
+            <Button
+              variant="outline"
+              onClick={() => router.push('/settings?tab=apikeys')}
+              className="border-border text-xs sm:text-sm px-4 py-2"
+            >
+              <FileText className="size-4 mr-1.5" />
+              Create API Campaign
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">

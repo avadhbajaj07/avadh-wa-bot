@@ -27,6 +27,7 @@ import {
   RefreshCw,
   PanelRightOpen,
   PanelRightClose,
+  Plus,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { useTranslations } from "next-intl";
@@ -871,16 +872,25 @@ export function MessageThread({
   // pattern under the user's eye.
   if (!conversation || !contact) {
     return (
-      <div className={cn("flex flex-1 flex-col items-center justify-center", DOODLE_BG_CLASSES)}>
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-          <MessageSquare className="h-8 w-8 text-muted-foreground" />
+      <div className="flex flex-1 flex-col items-center justify-center bg-background p-6">
+        <div className="flex max-w-sm flex-col items-center justify-center rounded-3xl border border-border bg-card p-8 text-center shadow-xs">
+          <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary mb-4 shadow-xs">
+            <MessageSquare className="size-8 fill-primary/20 text-primary" />
+          </div>
+          <h3 className="text-base font-bold text-foreground">
+            Select a Chat to Get Started
+          </h3>
+          <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+            Choose a contact from the chats list to view your conversation or create a new chat to begin messaging.
+          </p>
+          <a
+            href="/contacts"
+            className="mt-5 inline-flex items-center gap-1.5 rounded-xl bg-primary px-5 py-2.5 text-xs font-semibold text-primary-foreground shadow-xs hover:bg-primary/90 transition-all hover:scale-105 active:scale-95"
+          >
+            <Plus className="size-3.5" />
+            + Start New Chat
+          </a>
         </div>
-        <h3 className="mt-4 text-sm font-medium text-muted-foreground">
-          {t("selectConversation")}
-        </h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {t("selectConversationHint")}
-        </p>
       </div>
     );
   }
