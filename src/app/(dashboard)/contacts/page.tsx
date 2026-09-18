@@ -552,6 +552,75 @@ export default function ContactsPage() {
     }
   }
 
+  function handleOpenBulkDeleteModal() {
+    setBulkDeleteOpen(true);
+  }
+
+  async function handleDeleteAllMatching() {
+    setDeleting(true);
+    try {
+      let idsToDelete: string[] = [];
+      if (selected.size > 0) {
+        idsToDelete = [...selected];
+      } else {
+        idsToDelete = await fetchAllContactIds();
+      }
+
+      if (idsToDelete.length === 0) {
+        toast.error('No contacts to delete');
+        setDeleting(false);
+        return;
+      }
+
+      const BATCH_SIZE = 100;
+      let deleted = 0;
+      for (let i = 0; i < idsToDelete.length; i += BATCH_SIZE) {
+        const batch = idsToDelete.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase.from('contacts').delete().in('id', batch);
+        if (error) throw error;
+        deleted += batch.length;
+      }
+
+      toast.success(t('toastBulkDeleted', { count: deleted }));
+      setSelected(new Set());
+      setBulkDeleteOpen(false);
+      await fetchUnusedStats();
+      fetchContacts();
+    } catch (err) {
+      console.error('Failed to bulk delete contacts:', err);
+      toast.error(t('toastBulkFailedDelete'));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleDeletePage() {
+    if (contacts.length === 0) return;
+    setDeleting(true);
+    try {
+      const idsToDelete = contacts.map((c) => c.id);
+      const BATCH_SIZE = 100;
+      let deleted = 0;
+      for (let i = 0; i < idsToDelete.length; i += BATCH_SIZE) {
+        const batch = idsToDelete.slice(i, i + BATCH_SIZE);
+        const { error } = await supabase.from('contacts').delete().in('id', batch);
+        if (error) throw error;
+        deleted += batch.length;
+      }
+
+      toast.success(t('toastBulkDeleted', { count: deleted }));
+      setSelected(new Set());
+      setBulkDeleteOpen(false);
+      await fetchUnusedStats();
+      fetchContacts();
+    } catch (err) {
+      console.error('Failed to bulk delete page contacts:', err);
+      toast.error(t('toastBulkFailedDelete'));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   async function handleBulkDelete() {
     const ids = [...selected];
     if (ids.length === 0) return;
@@ -690,6 +759,19 @@ export default function ContactsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {totalCount > 0 && (
+            <GatedButton
+              variant="outline"
+              size="sm"
+              canAct={canEdit}
+              gateReason="delete contacts"
+              onClick={handleOpenBulkDeleteModal}
+              className="border-red-500/30 text-red-500 hover:bg-red-500/10 hover:text-red-600 font-medium"
+            >
+              <Trash2 className="size-3.5 mr-1" />
+              Bulk Delete {selected.size > 0 ? `(${selected.size})` : ''}
+            </GatedButton>
+          )}
           {unusedStats.count > 0 && (
             <GatedButton
               variant="outline"
@@ -903,6 +985,20 @@ export default function ContactsPage() {
                 ? `Select All (${totalCount})`
                 : `Select All (${totalCount})`}
             </Button>
+          )}
+
+          {selected.size > 0 && (
+            <GatedButton
+              variant="destructive"
+              size="sm"
+              canAct={canEdit}
+              gateReason="delete contacts"
+              onClick={handleOpenBulkDeleteModal}
+              className="h-8 text-xs shrink-0 font-medium"
+            >
+              <Trash2 className="size-3.5 mr-1" />
+              Delete ({selected.size})
+            </GatedButton>
           )}
         </div>
 
@@ -1312,34 +1408,104 @@ export default function ContactsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Bulk Delete Confirmation */}
+      {/* Bulk Delete Dialog */}
       <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-        <DialogContent className="bg-popover border-border text-popover-foreground sm:max-w-sm">
+        <DialogContent className="bg-popover border-border text-popover-foreground sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-popover-foreground">
-              {t('deleteBulkTitle')}
+            <DialogTitle className="text-popover-foreground flex items-center gap-2">
+              <Trash2 className="size-4 text-red-500" />
+              {selected.size > 0
+                ? t('deleteBulkTitle')
+                : 'Bulk Delete Contacts'}
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              {t('deleteBulkDesc', { count: selected.size })}
+              {selected.size > 0
+                ? t('deleteBulkDesc', { count: selected.size })
+                : `You have ${totalCount} contact${totalCount === 1 ? '' : 's'} matching your current filters. Choose an option below:`}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter className="bg-popover border-border">
-            <Button
-              variant="outline"
-              onClick={() => setBulkDeleteOpen(false)}
-              className="border-border text-muted-foreground hover:bg-muted"
-            >
-              {t('cancel')}
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleBulkDelete}
-              disabled={deleting}
-            >
-              {deleting && <Loader2 className="size-4 animate-spin" />}
-              {t('deleteBtn')} ({selected.size})
-            </Button>
-          </DialogFooter>
+
+          {selected.size === 0 ? (
+            <div className="space-y-3 py-2">
+              <div className="rounded-lg border border-border bg-muted/40 p-3.5 space-y-2">
+                <p className="text-sm font-semibold text-foreground">Option 1: Delete All Matching Contacts</p>
+                <p className="text-xs text-muted-foreground">
+                  Permanently delete all <strong className="text-foreground">{totalCount}</strong> contact{totalCount === 1 ? '' : 's'} across all pages.
+                </p>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleDeleteAllMatching}
+                  disabled={deleting || totalCount === 0}
+                  className="w-full text-xs font-medium"
+                >
+                  {deleting && <Loader2 className="size-3.5 mr-1.5 animate-spin" />}
+                  <Trash2 className="size-3.5 mr-1.5" />
+                  Delete All {totalCount} Contacts
+                </Button>
+              </div>
+
+              {contacts.length > 0 && contacts.length < totalCount && (
+                <div className="rounded-lg border border-border bg-muted/40 p-3.5 space-y-2">
+                  <p className="text-sm font-semibold text-foreground">Option 2: Delete Current Page Only</p>
+                  <p className="text-xs text-muted-foreground">
+                    Delete only the <strong className="text-foreground">{contacts.length}</strong> contacts shown on this page.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDeletePage}
+                    disabled={deleting}
+                    className="w-full text-xs border-red-500/30 text-red-500 hover:bg-red-500/10"
+                  >
+                    {deleting && <Loader2 className="size-3.5 mr-1.5 animate-spin" />}
+                    <Trash2 className="size-3.5 mr-1.5" />
+                    Delete Page ({contacts.length} contacts)
+                  </Button>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-1">
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={() => {
+                    setBulkDeleteOpen(false);
+                    handleSelectAllMatching();
+                  }}
+                  className="text-xs text-primary p-0 h-auto"
+                >
+                  Select all first to review
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setBulkDeleteOpen(false)}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {t('cancel')}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <DialogFooter className="bg-popover border-border">
+              <Button
+                variant="outline"
+                onClick={() => setBulkDeleteOpen(false)}
+                className="border-border text-muted-foreground hover:bg-muted"
+              >
+                {t('cancel')}
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleBulkDelete}
+                disabled={deleting}
+              >
+                {deleting && <Loader2 className="size-4 animate-spin" />}
+                {t('deleteBtn')} ({selected.size})
+              </Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
 
