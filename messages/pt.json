@@ -83,8 +83,12 @@
   "Dashboard": {
     "page": {
       "title": "Painel",
-      "description": "Métricas ao vivo de conversas, contatos, negócios, disparos e automações.",
+      "description": "Métricas ao vivo de conversas, contatos, disparos e automações.",
       "activeConversations": "Conversas ativas",
+      "totalContacts": "Total de contatos",
+      "contactsNewToday": "{count} adicionados hoje",
+      "totalBroadcasts": "Total de transmissões",
+      "broadcastsRecipients": "{count} destinatários alcançados",
       "newContactsToday": "Novos contatos hoje",
       "openDealsValue": "Valor dos negócios abertos",
       "messagesSentToday": "Mensagens enviadas hoje",
@@ -95,9 +99,23 @@
     },
     "quickActions": {
       "newContact": "Novo contato",
+      "newFlow": "Novo fluxo",
       "newDeal": "Novo negócio",
       "newBroadcast": "Novo disparo",
       "newAutomation": "Nova automação"
+    },
+    "campaignOverview": {
+      "title": "Desempenho de transmissão",
+      "description": "Resumo das taxas de entrega e leitura",
+      "sent": "Enviados",
+      "delivered": "Entregues",
+      "read": "Lidos",
+      "failed": "Falhos",
+      "deliveryRate": "Taxa de entrega",
+      "recentCampaigns": "Campanhas recentes",
+      "noCampaigns": "Nenhum disparo ainda",
+      "noCampaignsHint": "Crie um disparo para ver análises aqui.",
+      "viewAll": "Ver tudo"
     },
     "activityFeed": {
       "title": "Atividade recente",

@@ -2,12 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useAuth } from '@/hooks/use-auth'
-import { formatCurrency } from '@/lib/currency'
 import {
   MessageSquare,
-  UserPlus,
-  DollarSign,
+  Users,
+  Megaphone,
   Send,
 } from 'lucide-react'
 
@@ -15,23 +13,20 @@ import {
   loadActivity,
   loadConversationsSeries,
   loadMetrics,
-  loadPipelineDonut,
-  loadResponseTime,
+  loadBroadcastsSummary,
 } from '@/lib/dashboard/queries'
 import type {
   ActivityItem,
   ConversationsSeriesPoint,
   MetricsBundle,
-  PipelineDonutData,
-  ResponseTimeSummary,
+  BroadcastsSummaryData,
 } from '@/lib/dashboard/types'
 
 import { MetricCard } from '@/components/dashboard/metric-card'
 import { SkeletonCard } from '@/components/dashboard/skeleton'
 import { QuickActions } from '@/components/dashboard/quick-actions'
 import { ConversationsChart } from '@/components/dashboard/conversations-chart'
-import { PipelineDonut } from '@/components/dashboard/pipeline-donut'
-import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
+import { CampaignOverview } from '@/components/dashboard/campaign-overview'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
 
 import { useTranslations } from 'next-intl'
@@ -43,7 +38,6 @@ type RangeDays = 7 | 30 | 90
 
 export default function DashboardPage() {
   const t = useTranslations('Dashboard.page')
-  const { defaultCurrency } = useAuth()
   const searchParams = useSearchParams()
   const [metrics, setMetrics] = useState<MetricsBundle | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(true)
@@ -60,11 +54,8 @@ export default function DashboardPage() {
   })
   const [seriesLoading, setSeriesLoading] = useState(true)
 
-  const [pipeline, setPipeline] = useState<PipelineDonutData | null>(null)
-  const [pipelineLoading, setPipelineLoading] = useState(true)
-
-  const [responseTime, setResponseTime] = useState<ResponseTimeSummary | null>(null)
-  const [responseTimeLoading, setResponseTimeLoading] = useState(true)
+  const [campaignsSummary, setCampaignsSummary] = useState<BroadcastsSummaryData | null>(null)
+  const [campaignsSummaryLoading, setCampaignsSummaryLoading] = useState(true)
 
   const [activity, setActivity] = useState<ActivityItem[] | null>(null)
   const [activityLoading, setActivityLoading] = useState(true)
@@ -85,15 +76,10 @@ export default function DashboardPage() {
       .catch((err) => console.error('[dashboard] series failed:', err))
       .finally(() => setSeriesLoading(false))
 
-    void loadPipelineDonut(db)
-      .then((p) => setPipeline(p))
-      .catch((err) => console.error('[dashboard] pipeline failed:', err))
-      .finally(() => setPipelineLoading(false))
-
-    void loadResponseTime(db)
-      .then((r) => setResponseTime(r))
-      .catch((err) => console.error('[dashboard] response time failed:', err))
-      .finally(() => setResponseTimeLoading(false))
+    void loadBroadcastsSummary(db)
+      .then((c) => setCampaignsSummary(c))
+      .catch((err) => console.error('[dashboard] campaigns summary failed:', err))
+      .finally(() => setCampaignsSummaryLoading(false))
 
     // Fetch up to 50 so the biggest page-size option in the feed
     // (50 rows) is already in memory — switching sizes then becomes
@@ -177,24 +163,20 @@ export default function DashboardPage() {
               }}
             />
             <MetricCard
-              title={t('newContactsToday')}
-              value={metrics.newContactsToday.current.toLocaleString()}
-              icon={UserPlus}
-              delta={{
-                sign:
-                  metrics.newContactsToday.current - metrics.newContactsToday.previous,
-                label: deltaLabel(
-                  metrics.newContactsToday.current - metrics.newContactsToday.previous,
-                  t('vsYesterday'),
-                  t('noChange', { suffix: t('vsYesterday') })
-                ),
-              }}
+              title={t('totalContacts')}
+              value={metrics.totalContacts.current.toLocaleString()}
+              icon={Users}
+              subtitle={
+                metrics.totalContacts.newToday > 0
+                  ? t('contactsNewToday', { count: metrics.totalContacts.newToday })
+                  : undefined
+              }
             />
             <MetricCard
-              title={t('openDealsValue')}
-              value={formatCurrency(metrics.openDealsValue, defaultCurrency)}
-              icon={DollarSign}
-              subtitle={t('openDeals', { count: metrics.openDealsCount })}
+              title={t('totalBroadcasts')}
+              value={metrics.totalBroadcasts.current.toLocaleString()}
+              icon={Megaphone}
+              subtitle={t('broadcastsRecipients', { count: metrics.totalBroadcasts.totalRecipients })}
             />
             <MetricCard
               title={t('messagesSentToday')}
@@ -218,12 +200,6 @@ export default function DashboardPage() {
       <QuickActions />
 
       {/* Charts row */}
-      {/* items-stretch (the grid default) stretches the two columns to
-          match the tallest sibling; adding h-full on each wrapper and
-          on the inner panels makes both cards actually fill that
-          stretched height so their rounded borders line up. Without
-          this, the pipeline card rendered at its natural (shorter)
-          height while the line chart drove the row height. */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
         <div className="h-full lg:col-span-3">
           <ConversationsChart
@@ -234,16 +210,12 @@ export default function DashboardPage() {
           />
         </div>
         <div className="h-full lg:col-span-2">
-          <PipelineDonut
-            data={pipeline}
-            loading={pipelineLoading}
-            currency={defaultCurrency}
+          <CampaignOverview
+            data={campaignsSummary}
+            loading={campaignsSummaryLoading}
           />
         </div>
       </div>
-
-      {/* Response time */}
-      <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
 
       {/* Activity feed */}
       <ActivityFeed items={activity} loading={activityLoading} />

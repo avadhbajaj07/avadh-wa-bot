@@ -83,8 +83,12 @@
   "Dashboard": {
     "page": {
       "title": "Dashboard",
-      "description": "Live analytics across conversations, contacts, deals, broadcasts, and automations.",
+      "description": "Live analytics across conversations, contacts, broadcasts, and automations.",
       "activeConversations": "Active Conversations",
+      "totalContacts": "Total Contacts",
+      "contactsNewToday": "{count} added today",
+      "totalBroadcasts": "Total Broadcasts",
+      "broadcastsRecipients": "{count} recipients reached",
       "newContactsToday": "New Contacts Today",
       "openDealsValue": "Open Deals Value",
       "messagesSentToday": "Messages Sent Today",
@@ -95,9 +99,23 @@
     },
     "quickActions": {
       "newContact": "New Contact",
+      "newFlow": "New Flow",
       "newDeal": "New Deal",
       "newBroadcast": "New Broadcast",
       "newAutomation": "New Automation"
+    },
+    "campaignOverview": {
+      "title": "Broadcast Performance",
+      "description": "Summary of delivery & read rates",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "read": "Read",
+      "failed": "Failed",
+      "deliveryRate": "Delivery Rate",
+      "recentCampaigns": "Recent Campaigns",
+      "noCampaigns": "No broadcasts sent yet",
+      "noCampaignsHint": "Create a broadcast to see campaign analytics here.",
+      "viewAll": "View all"
     },
     "activityFeed": {
       "title": "Recent Activity",

@@ -11,9 +11,8 @@ import type {
   ActivityItem,
   ConversationsSeriesPoint,
   MetricsBundle,
+  BroadcastsSummaryData,
   PipelineDonutData,
-  PipelineStageSlice,
-  ResponseTimeBucket,
   ResponseTimeSummary,
 } from './types'
 
@@ -37,9 +36,9 @@ export async function loadMetrics(db: DB): Promise<MetricsBundle> {
     openConvCur,
     newConvToday,
     newConvYesterday,
-    newContactsToday,
-    newContactsYesterday,
-    openDeals,
+    totalContactsRes,
+    newContactsTodayRes,
+    broadcastsRes,
     messagesToday,
     messagesYesterday,
   ] = await Promise.all([
@@ -55,43 +54,38 @@ export async function loadMetrics(db: DB): Promise<MetricsBundle> {
       .eq('status', 'open')
       .gte('created_at', yesterdayStart)
       .lt('created_at', todayStart),
+    db.from('contacts').select('id', { count: 'exact', head: true }),
     db.from('contacts').select('id', { count: 'exact', head: true }).gte('created_at', todayStart),
-    db
-      .from('contacts')
-      .select('id', { count: 'exact', head: true })
-      .gte('created_at', yesterdayStart)
-      .lt('created_at', todayStart),
-    db.from('deals').select('value, status').eq('status', 'open'),
+    db.from('broadcasts').select('id, total_recipients, status').neq('status', 'draft'),
     db
       .from('messages')
       .select('id', { count: 'exact', head: true })
-      .eq('sender_type', 'agent')
+      .neq('sender_type', 'customer')
       .gte('created_at', todayStart),
     db
       .from('messages')
       .select('id', { count: 'exact', head: true })
-      .eq('sender_type', 'agent')
+      .neq('sender_type', 'customer')
       .gte('created_at', yesterdayStart)
       .lt('created_at', todayStart),
   ])
 
-  const openDealsRows = (openDeals.data ?? []) as { value: number | null }[]
-  const openDealsValue = openDealsRows.reduce((sum, d) => sum + (d.value ?? 0), 0)
+  const broadcasts = (broadcastsRes.data ?? []) as { total_recipients: number | null }[]
+  const totalRecipients = broadcasts.reduce((sum, b) => sum + (b.total_recipients ?? 0), 0)
 
   return {
     activeConversations: {
       current: openConvCur.count ?? 0,
-      // "vs yesterday" on a current-state count has no clean answer
-      // without snapshots — we show the delta in NEW open conversations
-      // today vs yesterday. That's the business-meaningful daily signal.
       previous: (newConvToday.count ?? 0) - (newConvYesterday.count ?? 0),
     },
-    newContactsToday: {
-      current: newContactsToday.count ?? 0,
-      previous: newContactsYesterday.count ?? 0,
+    totalContacts: {
+      current: totalContactsRes.count ?? 0,
+      newToday: newContactsTodayRes.count ?? 0,
     },
-    openDealsValue,
-    openDealsCount: openDealsRows.length,
+    totalBroadcasts: {
+      current: broadcasts.length,
+      totalRecipients,
+    },
     messagesSentToday: {
       current: messagesToday.count ?? 0,
       previous: messagesYesterday.count ?? 0,
@@ -128,148 +122,97 @@ export async function loadConversationsSeries(
   return keys.map((day) => ({ day, ...(buckets.get(day) ?? { incoming: 0, outgoing: 0 }) }))
 }
 
-// --- 3. Pipeline donut -------------------------------------------------
+// --- 3. Broadcasts summary ---------------------------------------------
+
+export async function loadBroadcastsSummary(db: DB): Promise<BroadcastsSummaryData> {
+  const { data, error } = await db
+    .from('broadcasts')
+    .select('id, name, template_name, status, total_recipients, sent_count, delivered_count, read_count, failed_count, created_at')
+    .neq('status', 'draft')
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[dashboard] broadcasts summary error:', error)
+    return {
+      totalCampaigns: 0,
+      totalSent: 0,
+      totalDelivered: 0,
+      totalRead: 0,
+      totalFailed: 0,
+      deliveryRate: 0,
+      recentCampaigns: [],
+    }
+  }
+
+  const rows = (data ?? []) as Array<{
+    id: string
+    name: string
+    template_name: string
+    status: string
+    total_recipients: number | null
+    sent_count: number | null
+    delivered_count: number | null
+    read_count: number | null
+    failed_count: number | null
+    created_at: string
+  }>
+
+  let totalSent = 0
+  let totalDelivered = 0
+  let totalRead = 0
+  let totalFailed = 0
+
+  for (const r of rows) {
+    totalSent += r.sent_count ?? 0
+    totalDelivered += r.delivered_count ?? 0
+    totalRead += r.read_count ?? 0
+    totalFailed += r.failed_count ?? 0
+  }
+
+  const denominator = totalSent > 0 ? totalSent : totalDelivered
+  const deliveryRate = denominator > 0 ? Math.min(100, Math.round((totalDelivered / denominator) * 100)) : 0
+
+  const recentCampaigns = rows.slice(0, 5).map((r) => ({
+    id: r.id,
+    name: r.name,
+    template_name: r.template_name,
+    status: r.status,
+    total_recipients: r.total_recipients ?? 0,
+    delivered_count: r.delivered_count ?? 0,
+    read_count: r.read_count ?? 0,
+    created_at: r.created_at,
+  }))
+
+  return {
+    totalCampaigns: rows.length,
+    totalSent,
+    totalDelivered,
+    totalRead,
+    totalFailed,
+    deliveryRate,
+    recentCampaigns,
+  }
+}
+
+// --- 4. Pipeline donut (deprecated/unused) ------------------------------
 
 export async function loadPipelineDonut(db: DB): Promise<PipelineDonutData> {
-  const [stagesRes, dealsRes] = await Promise.all([
-    db.from('pipeline_stages').select('id, name, color, pipeline_id, position').order('position'),
-    db.from('deals').select('stage_id, value, status').eq('status', 'open'),
-  ])
-
-  const stages =
-    (stagesRes.data ?? []) as { id: string; name: string; color: string }[]
-  const deals = (dealsRes.data ?? []) as { stage_id: string; value: number | null }[]
-
-  const byStage = new Map<string, { count: number; total: number }>()
-  for (const d of deals) {
-    const row = byStage.get(d.stage_id) ?? { count: 0, total: 0 }
-    row.count += 1
-    row.total += d.value ?? 0
-    byStage.set(d.stage_id, row)
-  }
-
-  const slices: PipelineStageSlice[] = stages
-    .map((s) => ({
-      id: s.id,
-      name: s.name,
-      color: s.color || '#64748b',
-      dealCount: byStage.get(s.id)?.count ?? 0,
-      totalValue: byStage.get(s.id)?.total ?? 0,
-    }))
-    // Hide empty stages from the ring (but we'd still show them in the
-    // legend if the user wanted a full breakdown — trimming keeps the
-    // visual clean for the common case).
-    .filter((s) => s.totalValue > 0 || s.dealCount > 0)
-
-  return {
-    stages: slices,
-    totalValue: slices.reduce((sum, s) => sum + s.totalValue, 0),
-  }
+  return { stages: [], totalValue: 0 }
 }
 
-// --- 4. Response time by day of week ----------------------------------
+// --- 5. Response time by day of week (deprecated/unused) ----------------
 
 export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
-  // Pull the last 14 days of messages in one shot, then walk per
-  // conversation to find each "first inbound" → "first subsequent
-  // outbound" pair. 14 days gives us both "this week" + "last week"
-  // with enough overlap if the user opens the dashboard late on a
-  // Monday.
-  const fourteenDaysAgo = daysAgoStart(13).toISOString()
-  const { data, error } = await db
-    .from('messages')
-    .select('conversation_id, sender_type, created_at')
-    .gte('created_at', fourteenDaysAgo)
-    .order('conversation_id', { ascending: true })
-    .order('created_at', { ascending: true })
-  if (error) throw error
-
-  const rows = (data ?? []) as {
-    conversation_id: string
-    sender_type: string
-    created_at: string
-  }[]
-
-  // Group per conversation, pair unreplied customer messages with the
-  // next outbound message from the agent/bot. A single customer message
-  // can only count once (avoids inflating averages if the customer
-  // double-messages while the agent takes time to reply).
-  interface Sample {
-    customerAt: Date
-    responseAt: Date
-  }
-  const samples: Sample[] = []
-
-  let currentConv = ''
-  let pendingCustomer: Date | null = null
-  for (const row of rows) {
-    if (row.conversation_id !== currentConv) {
-      currentConv = row.conversation_id
-      pendingCustomer = null
-    }
-    const ts = new Date(row.created_at)
-    if (row.sender_type === 'customer') {
-      if (!pendingCustomer) pendingCustomer = ts
-    } else if (pendingCustomer) {
-      samples.push({ customerAt: pendingCustomer, responseAt: ts })
-      pendingCustomer = null
-    }
-  }
-
-  const now = new Date()
-  const thisWeekStart = daysAgoStart(mondayIndex(now))
-  const lastWeekStart = daysAgoStart(mondayIndex(now) + 7)
-
-  // Per-day-of-week buckets, averaged over both weeks' worth of data
-  // so each bar has more samples to stand on. If a day has no samples
-  // its avgMinutes stays null and the chart renders the bar muted.
-  const byDow = new Map<number, number[]>()
-  for (let i = 0; i < 7; i++) byDow.set(i, [])
-  const thisWeekMins: number[] = []
-  const lastWeekMins: number[] = []
-
-  for (const s of samples) {
-    const diffMin = (s.responseAt.getTime() - s.customerAt.getTime()) / 60_000
-    if (diffMin < 0) continue
-    const dow = mondayIndex(s.customerAt)
-    byDow.get(dow)!.push(diffMin)
-    if (s.customerAt >= thisWeekStart) {
-      thisWeekMins.push(diffMin)
-    } else if (s.customerAt >= lastWeekStart && s.customerAt < thisWeekStart) {
-      lastWeekMins.push(diffMin)
-    }
-  }
-
-  const avg = (arr: number[]) =>
-    arr.length === 0 ? null : arr.reduce((a, b) => a + b, 0) / arr.length
-
-  const buckets: ResponseTimeBucket[] = Array.from({ length: 7 }, (_, dow) => {
-    const samples = byDow.get(dow) ?? []
-    return {
-      dow,
-      avgMinutes: avg(samples),
-      samples: samples.length,
-    }
-  })
-
-  // Silence unused-label warnings — keep the arrays explicitly named
-  // for readability above.
-  void DOW_SHORT_MON_FIRST
-
-  return {
-    buckets,
-    thisWeekAvg: avg(thisWeekMins),
-    lastWeekAvg: avg(lastWeekMins),
-  }
+  return { buckets: [], thisWeekAvg: null, lastWeekAvg: null }
 }
 
-// --- 5. Activity feed --------------------------------------------------
+// --- 6. Activity feed --------------------------------------------------
 
 export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> {
   // Pull ~10 from each source (plenty of headroom after merge-sort),
   // then interleave by timestamp. The individual per-table limits
   // keep the payload small; the final limit is enforced after sort.
-  const [msgs, contacts, deals, broadcasts, autoLogs] = await Promise.all([
+  const [msgs, contacts, broadcasts, autoLogs] = await Promise.all([
     db
       .from('messages')
       .select('id, content_text, sender_type, created_at, conversation_id, conversations(contact_id, contacts(name, phone))')
@@ -280,11 +223,6 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
       .from('contacts')
       .select('id, name, phone, created_at')
       .order('created_at', { ascending: false })
-      .limit(10),
-    db
-      .from('deals')
-      .select('id, title, updated_at, stage:pipeline_stages(name)')
-      .order('updated_at', { ascending: false })
       .limit(10),
     db
       .from('broadcasts')
@@ -334,23 +272,6 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
     })
   }
 
-  for (const d of (deals.data ?? []) as unknown as Array<{
-    id: string
-    title: string
-    updated_at: string
-    stage: { name: string }[] | { name: string } | null
-  }>) {
-    const stage = Array.isArray(d.stage) ? d.stage[0] : d.stage
-    items.push({
-      id: `deal-${d.id}`,
-      kind: 'deal',
-      text: stage?.name
-        ? `Deal "${d.title}" in ${stage.name}`
-        : `Deal "${d.title}" updated`,
-      at: d.updated_at,
-      href: '/pipelines',
-    })
-  }
 
   for (const b of (broadcasts.data ?? []) as Array<{
     id: string

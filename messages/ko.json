@@ -83,8 +83,12 @@
   "Dashboard": {
     "page": {
       "title": "대시보드",
-      "description": "대화, 연락처, 딜, 브로드캐스트, 자동화 전반의 실시간 분석입니다.",
+      "description": "대화, 연락처, 브로드캐스트, 자동화 전반의 실시간 분석입니다.",
       "activeConversations": "진행 중인 대화",
+      "totalContacts": "총 연락처",
+      "contactsNewToday": "오늘 {count}명 추가됨",
+      "totalBroadcasts": "총 브로드캐스트",
+      "broadcastsRecipients": "총 {count}명 도달",
       "newContactsToday": "오늘의 신규 연락처",
       "openDealsValue": "진행 중인 딜 금액",
       "messagesSentToday": "오늘 보낸 메시지",
@@ -95,9 +99,23 @@
     },
     "quickActions": {
       "newContact": "새 연락처",
+      "newFlow": "새 플로우",
       "newDeal": "새 딜",
       "newBroadcast": "새 브로드캐스트",
       "newAutomation": "새 자동화"
+    },
+    "campaignOverview": {
+      "title": "브로드캐스트 성과",
+      "description": "전송 및 읽음 비율 요약",
+      "sent": "전송됨",
+      "delivered": "도달됨",
+      "read": "읽음",
+      "failed": "실패",
+      "deliveryRate": "전송 성공률",
+      "recentCampaigns": "최근 캠페인",
+      "noCampaigns": "아직 전송된 브로드캐스트가 없습니다",
+      "noCampaignsHint": "브로드캐스트를 생성하여 분석 통계를 확인하세요.",
+      "viewAll": "전체 보기"
     },
     "activityFeed": {
       "title": "최근 활동",

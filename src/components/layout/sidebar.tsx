@@ -124,10 +124,6 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const { profile, profileLoading, account, accountRole, signOut } = useAuth();
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
-  const [contactsExpanded, setContactsExpanded] = useState(
-    pathname.startsWith("/contacts") || pathname.startsWith("/pipelines")
-  );
-
   const showAccountStrip =
     !profileLoading &&
     !!account?.name &&
@@ -138,13 +134,6 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   useEffect(() => {
     onClose?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
-
-  // Auto-expand contacts if navigating to contacts or pipelines
-  useEffect(() => {
-    if (pathname.startsWith("/contacts") || pathname.startsWith("/pipelines")) {
-      setContactsExpanded(true);
-    }
   }, [pathname]);
 
   // Lock body scroll and allow Escape to close while the drawer is open on
@@ -212,73 +201,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
             {navItems.map((item) => {
-              if (item.href === "/contacts") {
-                const isContactsSectionActive =
-                  pathname === "/contacts" || pathname.startsWith("/pipelines");
-                return (
-                  <li key="contacts-group" className="flex flex-col">
-                    <div
-                      className={cn(
-                        "flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-colors lg:py-2 select-none",
-                        isContactsSectionActive
-                          ? "bg-primary/10 text-primary font-semibold"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                      )}
-                    >
-                      <Link
-                        href="/contacts"
-                        className="flex flex-1 items-center gap-3"
-                      >
-                        <item.icon className="h-4 w-4" />
-                        <span>{t(item.labelKey as string)}</span>
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setContactsExpanded((prev) => !prev);
-                        }}
-                        className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-                        aria-label="Toggle contacts submenu"
-                      >
-                        {contactsExpanded ? (
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        )}
-                      </button>
-                    </div>
 
-                    {contactsExpanded && (
-                      <div className="mt-1 ml-4 flex flex-col gap-0.5 border-l-2 border-primary/20 pl-2">
-                        <Link
-                          href="/contacts"
-                          className={cn(
-                            "flex items-center rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-                            pathname === "/contacts"
-                              ? "bg-primary/10 text-primary font-semibold"
-                              : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                          )}
-                        >
-                          {t("allContacts")}
-                        </Link>
-                        <Link
-                          href="/pipelines"
-                          className={cn(
-                            "flex items-center rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors",
-                            pathname.startsWith("/pipelines")
-                              ? "bg-primary/10 text-primary font-semibold"
-                              : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                          )}
-                        >
-                          {t("leads")}
-                        </Link>
-                      </div>
-                    )}
-                  </li>
-                );
-              }
 
               const isActive =
                 pathname === item.href ||
