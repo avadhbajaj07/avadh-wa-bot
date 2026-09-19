@@ -26,6 +26,7 @@ import { parseContactCsv } from '@/lib/contacts/parse-contact-csv';
 export interface BroadcastCsvContact {
   phone: string;
   name?: string;
+  tags?: string[];
 }
 
 export type BroadcastCsvError =
@@ -53,11 +54,11 @@ export function parseBroadcastCsv(text: string): ParseBroadcastCsvResult {
 
   return {
     ok: true,
-    // Drop email/company/tags: the broadcast audience only addresses
-    // people, and `name` is the sole field template variables can map.
-    contacts: unique.map(({ phone, name }) =>
-      name ? { phone, name } : { phone }
-    ),
+    contacts: unique.map(({ phone, name, tagNames }) => ({
+      phone,
+      ...(name ? { name } : {}),
+      ...(tagNames && tagNames.length > 0 ? { tags: tagNames } : {}),
+    })),
     duplicates,
   };
 }

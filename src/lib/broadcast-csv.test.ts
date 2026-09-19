@@ -28,7 +28,7 @@ describe('parseBroadcastCsv', () => {
     });
   });
 
-  it('drops the extra columns the importer understands', () => {
+  it('captures tags while dropping unused columns like email and company', () => {
     const result = parseBroadcastCsv(
       `phone,name,email,company,tags
 +15551230000,Ada,ada@example.com,Analytical Engines,"VIP, Lead"`
@@ -36,7 +36,7 @@ describe('parseBroadcastCsv', () => {
     expect(result).toEqual({
       ok: true,
       duplicates: 0,
-      contacts: [{ phone: '+15551230000', name: 'Ada' }],
+      contacts: [{ phone: '+15551230000', name: 'Ada', tags: ['VIP', 'Lead'] }],
     });
   });
 

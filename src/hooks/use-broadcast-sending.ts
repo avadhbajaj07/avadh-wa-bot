@@ -8,6 +8,7 @@ import {
   batchRetryDelayMs,
 } from '@/lib/broadcast-retry';
 import { normalizeKey } from '@/lib/contacts/dedupe';
+import { resolveImportTagIds } from '@/lib/contacts/resolve-import-tags';
 import { Contact, MessageTemplate } from '@/types';
 
 export type CustomFieldOperator = 'is' | 'is_not' | 'contains';
@@ -19,10 +20,12 @@ export interface CustomFieldFilter {
 }
 
 export interface AudienceConfig {
-  type: 'all' | 'tags' | 'custom_field' | 'csv';
+  type: 'all' | 'tags' | 'custom_field' | 'csv' | 'paste';
   tagIds?: string[];
   customField?: CustomFieldFilter;
-  csvContacts?: { phone: string; name?: string }[];
+  csvContacts?: { phone: string; name?: string; tags?: string[] }[];
+  /** Tags to automatically assign to all imported/pasted contacts in this audience. */
+  applyTagIds?: string[];
   /** Contacts carrying any of these tags are subtracted from the result. */
   excludeTagIds?: string[];
 }
@@ -197,8 +200,12 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       }
     } else if (audience.type === 'custom_field' && audience.customField) {
       contacts = await resolveCustomFieldAudience(supabase, audience.customField);
-    } else if (audience.type === 'csv' && audience.csvContacts) {
-      contacts = await upsertCsvContacts(supabase, audience.csvContacts);
+    } else if ((audience.type === 'csv' || audience.type === 'paste') && audience.csvContacts) {
+      contacts = await upsertCsvContacts(
+        supabase,
+        audience.csvContacts,
+        audience.applyTagIds
+      );
     }
 
     // Apply exclude tags (works across all contact-derived audience
@@ -216,22 +223,14 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
   }
 
   /**
-   * CSV uploads arrive as raw phone/name pairs, not DB rows. Before we
-   * can insert broadcast_recipients (whose contact_id FKs contacts.id),
-   * we need real contacts.id UUIDs. So: look up each CSV phone in the
-   * caller's contacts table; insert any that don't exist; return the
-   * resolved set.
-   *
-   * Pre-existing implementation synthesized `csv-N` strings as
-   * contact_id, which failed the UUID cast on insert — every CSV
-   * broadcast silently created zero recipients.
-   *
-   * Matching is on the normalized number throughout, so it agrees with
-   * the account-wide unique index rather than colliding with it.
+   * CSV uploads and pasted numbers arrive as raw phone/name pairs, not DB rows.
+   * Look up each phone in the caller's contacts table; insert any that don't exist;
+   * auto-assign any tags from the CSV or user selection; return the resolved set.
    */
   async function upsertCsvContacts(
     supabase: ReturnType<typeof createClient>,
-    csvRows: { phone: string; name?: string }[],
+    csvRows: { phone: string; name?: string; tags?: string[] }[],
+    applyTagIds?: string[],
   ): Promise<Contact[]> {
     if (csvRows.length === 0) return [];
 
@@ -246,29 +245,22 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       throw new Error('Your profile is not linked to an account.');
     }
 
-    // De-duplicate within the CSV on the NORMALIZED number — the same
-    // key the DB's UNIQUE (account_id, phone_normalized) index uses
-    // (migration 022). Keyed on the raw string instead, "+1 555-0100"
-    // and "15550100" survived as two rows and the insert below died on
-    // a 23505, failing the whole broadcast.
-    const uniqueByKey = new Map<string, { phone: string; name?: string }>();
+    // De-duplicate within the input on the NORMALIZED number
+    const uniqueByKey = new Map<string, { phone: string; name?: string; tags?: string[] }>();
     for (const row of csvRows) {
       const key = normalizeKey(row.phone);
       if (key && !uniqueByKey.has(key)) uniqueByKey.set(key, row);
     }
     const keys = [...uniqueByKey.keys()];
 
-    // Single round-trip lookup of the contacts already in this ACCOUNT.
-    // Scoping to `user_id` missed rows a teammate created on a shared
-    // account, so those numbers looked new and their inserts collided
-    // with the account-wide unique index.
+    // Single round-trip lookup of contacts already in this ACCOUNT
     const { data: existing, error: lookupErr } = await supabase
       .from('contacts')
       .select('*')
       .eq('account_id', accountId)
       .in('phone_normalized', keys);
     if (lookupErr) {
-      throw new Error(`Failed to look up CSV contacts: ${lookupErr.message}`);
+      throw new Error(`Failed to look up contacts: ${lookupErr.message}`);
     }
 
     const byKey = new Map<string, Contact>();
@@ -277,8 +269,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       if (key) byKey.set(key, c);
     }
 
-    // Insert only missing contacts, in one batch per 200 rows (PostgREST
-    // has a default payload cap — 200 keeps individual requests small).
+    // Insert only missing contacts
     const missing = keys
       .filter((k) => !byKey.has(k))
       .map((k) => uniqueByKey.get(k)!)
@@ -297,7 +288,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         .insert(chunk)
         .select();
       if (insertErr) {
-        throw new Error(`Failed to create CSV contacts: ${insertErr.message}`);
+        throw new Error(`Failed to create contacts: ${insertErr.message}`);
       }
       for (const c of (inserted ?? []) as Contact[]) {
         const key = normalizeKey(c.phone ?? '');
@@ -305,10 +296,66 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       }
     }
 
-    // Preserve input order so analytics roughly matches the CSV order.
-    return keys
+    // Preserve input order
+    const resolvedContacts = keys
       .map((k) => byKey.get(k))
       .filter((c): c is Contact => Boolean(c));
+
+    // Auto-accept and assign tags: user-selected applyTagIds + row-level tags from CSV
+    try {
+      const allRowTagNames = new Set<string>();
+      for (const row of csvRows) {
+        if (row.tags) {
+          for (const t of row.tags) {
+            if (t.trim()) allRowTagNames.add(t.trim());
+          }
+        }
+      }
+
+      let tagIdByKey = new Map<string, string>();
+      if (allRowTagNames.size > 0) {
+        const { tagIdByKey: resolved } = await resolveImportTagIds(supabase, {
+          accountId,
+          userId: user.id,
+          tagNames: [...allRowTagNames],
+          canCreateTags: true,
+        });
+        tagIdByKey = resolved;
+      }
+
+      const tagRows: { contact_id: string; tag_id: string }[] = [];
+      for (const contact of resolvedContacts) {
+        const key = normalizeKey(contact.phone ?? '');
+        const row = uniqueByKey.get(key);
+        const contactTagIds = new Set<string>(applyTagIds ?? []);
+
+        if (row?.tags) {
+          for (const t of row.tags) {
+            const id = tagIdByKey.get(t.trim().toLowerCase());
+            if (id) contactTagIds.add(id);
+          }
+        }
+
+        for (const tagId of contactTagIds) {
+          tagRows.push({ contact_id: contact.id, tag_id: tagId });
+        }
+      }
+
+      if (tagRows.length > 0) {
+        const TAG_CHUNK = 100;
+        for (let i = 0; i < tagRows.length; i += TAG_CHUNK) {
+          const chunk = tagRows.slice(i, i + TAG_CHUNK);
+          await supabase.from('contact_tags').upsert(chunk, {
+            onConflict: 'contact_id,tag_id',
+            ignoreDuplicates: true,
+          });
+        }
+      }
+    } catch (tagErr) {
+      console.error('[upsertCsvContacts] Failed to auto-assign tags:', tagErr);
+    }
+
+    return resolvedContacts;
   }
 
   async function resolveCustomFieldAudience(

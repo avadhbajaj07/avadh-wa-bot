@@ -20,7 +20,8 @@ import { useTranslations } from 'next-intl';
 interface AudienceConfig {
   type: string;
   tagIds?: string[];
-  csvContacts?: { phone: string; name?: string }[];
+  csvContacts?: { phone: string; name?: string; tags?: string[] }[];
+  applyTagIds?: string[];
 }
 
 interface Step4Props {
@@ -70,7 +71,7 @@ export function Step4ScheduleSend({
 
           const uniqueIds = new Set((contactTags ?? []).map((ct) => ct.contact_id));
           setEstimatedReach(uniqueIds.size);
-        } else if (audience.type === 'csv' && audience.csvContacts) {
+        } else if ((audience.type === 'csv' || audience.type === 'paste') && audience.csvContacts) {
           setEstimatedReach(audience.csvContacts.length);
         } else {
           setEstimatedReach(0);
@@ -90,7 +91,9 @@ export function Step4ScheduleSend({
         ? t('scheduleSend.audienceTags')
         : audience.type === 'csv'
           ? t('scheduleSend.audienceCsv')
-          : t('scheduleSend.audienceField');
+          : audience.type === 'paste'
+            ? 'Pasted Numbers'
+            : t('scheduleSend.audienceField');
 
   return (
     <div className="space-y-6">

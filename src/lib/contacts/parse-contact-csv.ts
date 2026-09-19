@@ -1,6 +1,9 @@
+import { formatPhoneNumber } from './parse-pasted-numbers';
+
 /**
- * CSV parsing for the contacts import modal. Shared + unit-tested so
- * tag-column handling stays aligned with phone/name/email/company.
+ * CSV parsing for the contacts import modal and broadcast wizard.
+ * Shared + unit-tested so tag-column handling stays aligned with
+ * phone/name/email/company.
  */
 
 export interface ParsedContactRow {
@@ -46,9 +49,29 @@ export interface ParseContactCsvResult {
   hasCompanyColumn: boolean;
 }
 
+/** Detect delimiter (, or ; or \t or |) from the first line. */
+function detectDelimiter(firstLine: string): string {
+  const counts: Record<string, number> = { ',': 0, ';': 0, '\t': 0, '|': 0 };
+  let inQuotes = false;
+  for (const c of firstLine) {
+    if (c === '"') inQuotes = !inQuotes;
+    else if (!inQuotes && c in counts) counts[c]++;
+  }
+  let best = ',';
+  let max = 0;
+  for (const [delim, count] of Object.entries(counts)) {
+    if (count > max) {
+      max = count;
+      best = delim;
+    }
+  }
+  return best;
+}
+
 export function parseContactCsv(text: string): ParseContactCsvResult {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) {
+  const clean = text.replace(/^\uFEFF/, '').trim();
+  const lines = clean.split(/\r?\n/);
+  if (lines.length === 0 || (lines.length === 1 && !lines[0].trim())) {
     return {
       rows: [],
       hasPhoneColumn: false,
@@ -57,12 +80,64 @@ export function parseContactCsv(text: string): ParseContactCsvResult {
     };
   }
 
-  const headers = lines[0]
-    .split(',')
-    .map((h) => h.trim().toLowerCase().replace(/["']/g, ''));
+  const delimiter = detectDelimiter(lines[0]);
+  const headers = parseCsvLine(lines[0], delimiter).map((h) =>
+    h.trim().toLowerCase().replace(/["']/g, '')
+  );
 
-  const phoneIdx = headers.indexOf('phone');
+  // Flexible header matching
+  const phoneIdx = headers.findIndex((h) =>
+    /^(phone|mobile|contact|cell|tel|whatsapp|number|phone_?number|mobile_?number|contact_?number|phone_?no|mobile_?no|phonenumber|mobilenumber)(\s|_|-)?/i.test(
+      h
+    ) ||
+    h.includes('phone') ||
+    h.includes('mobile') ||
+    h.includes('whatsapp') ||
+    h === 'contact' ||
+    h === 'number'
+  );
+
+  const nameIdx = headers.findIndex((h) =>
+    /^(name|full_?name|first_?name|fullname|firstname|contact_?name|customer_?name|client_?name|user_?name)/i.test(
+      h
+    )
+  );
+  const emailIdx = headers.findIndex((h) =>
+    /^(email|email_?address|e-mail)/i.test(h)
+  );
+  const companyIdx = headers.findIndex((h) =>
+    /^(company|organization|organisation|business)/i.test(h)
+  );
+  const tagsIdx = headers.findIndex((h) =>
+    /^(tag|tags|tag_?names|tagnames|labels|category|categories|group|groups)/i.test(
+      h
+    )
+  );
+
+  // Check for headerless file (e.g., first line is already a phone number)
+  let isHeaderless = false;
+  let resolvedPhoneIdx = phoneIdx;
+  let resolvedNameIdx = nameIdx;
+
   if (phoneIdx === -1) {
+    const firstLineValues = parseCsvLine(lines[0], delimiter);
+    const candidateIdx = firstLineValues.findIndex((val) => {
+      const digits = val.replace(/\D/g, '');
+      return digits.length >= 7 && digits.length <= 15;
+    });
+    if (candidateIdx !== -1) {
+      isHeaderless = true;
+      resolvedPhoneIdx = candidateIdx;
+      // If there's another column with letters, assume it's name
+      if (firstLineValues.length > 1) {
+        resolvedNameIdx = firstLineValues.findIndex(
+          (val, idx) => idx !== candidateIdx && /[a-zA-Z]/.test(val)
+        );
+      }
+    }
+  }
+
+  if (resolvedPhoneIdx === -1) {
     return {
       rows: [],
       hasPhoneColumn: false,
@@ -70,32 +145,22 @@ export function parseContactCsv(text: string): ParseContactCsvResult {
       hasCompanyColumn: false,
     };
   }
-
-  const nameIdx = headers.indexOf('name');
-  const emailIdx = headers.indexOf('email');
-  const companyIdx = headers.indexOf('company');
-  const tagsIdx = headers.indexOf('tags');
 
   const rows: ParsedContactRow[] = [];
+  const startIdx = isHeaderless ? 0 : 1;
 
-  for (let i = 1; i < lines.length; i++) {
+  for (let i = startIdx; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
 
-    const values = parseCsvLine(line);
-    // A row with no usable phone is pushed through rather than dropped
-    // here — dedupeByPhone (shared with the webhook/manual-form paths)
-    // already treats an empty normalized key as invalid, and counting
-    // it there means the import result can tell the user "N contacts
-    // had no phone" instead of the row just vanishing with the total
-    // row count silently short of what's actually in the file.
-    const phone = values[phoneIdx]?.replace(/["']/g, '').trim() ?? '';
+    const values = parseCsvLine(line, delimiter);
+    const rawPhone = values[resolvedPhoneIdx]?.replace(/["']/g, '').trim() ?? '';
 
     rows.push({
-      phone,
+      phone: rawPhone,
       name:
-        nameIdx >= 0
-          ? values[nameIdx]?.replace(/["']/g, '').trim() || undefined
+        resolvedNameIdx >= 0
+          ? values[resolvedNameIdx]?.replace(/["']/g, '').trim() || undefined
           : undefined,
       email:
         emailIdx >= 0
@@ -106,7 +171,9 @@ export function parseContactCsv(text: string): ParseContactCsvResult {
           ? values[companyIdx]?.replace(/["']/g, '').trim() || undefined
           : undefined,
       tagNames:
-        tagsIdx >= 0 ? parseTagCell(values[tagsIdx]?.replace(/["']/g, '')) : [],
+        tagsIdx >= 0
+          ? parseTagCell(values[tagsIdx]?.replace(/["']/g, ''))
+          : [],
     });
   }
 
@@ -118,8 +185,8 @@ export function parseContactCsv(text: string): ParseContactCsvResult {
   };
 }
 
-/** Simple CSV line parse (handles quoted fields). */
-function parseCsvLine(line: string): string[] {
+/** CSV line parse (handles quoted fields and custom delimiter). */
+function parseCsvLine(line: string, delimiter = ','): string[] {
   const values: string[] = [];
   let current = '';
   let inQuotes = false;
@@ -127,7 +194,7 @@ function parseCsvLine(line: string): string[] {
   for (const char of line) {
     if (char === '"') {
       inQuotes = !inQuotes;
-    } else if (char === ',' && !inQuotes) {
+    } else if (char === delimiter && !inQuotes) {
       values.push(current.trim());
       current = '';
     } else {
@@ -137,3 +204,4 @@ function parseCsvLine(line: string): string[] {
   values.push(current.trim());
   return values;
 }
+
