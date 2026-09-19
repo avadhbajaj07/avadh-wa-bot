@@ -126,6 +126,18 @@ export default function TemplatesPage() {
   const [formBodyText, setFormBodyText] = useState('');
   const [formFooterText, setFormFooterText] = useState('');
   const [formButtons, setFormButtons] = useState<TemplateButton[]>([]);
+  const [formBodySamples, setFormBodySamples] = useState<Record<number, string>>({});
+  const [formHeaderSample, setFormHeaderSample] = useState('');
+
+  const bodyVariables = useMemo(() => {
+    const matches = formBodyText.matchAll(/\{\{(\d+)\}\}/g);
+    const set = new Set<number>();
+    for (const m of matches) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n >= 1) set.add(n);
+    }
+    return [...set].sort((a, b) => a - b);
+  }, [formBodyText]);
 
   async function fetchTemplates() {
     try {
@@ -178,6 +190,8 @@ export default function TemplatesPage() {
       setFormBodyText(preset.body_text);
       setFormFooterText(preset.footer_text || '');
       setFormButtons(preset.buttons || []);
+      setFormBodySamples({});
+      setFormHeaderSample('');
       setBrowseOpen(false);
     } else {
       setFormName('');
@@ -189,6 +203,8 @@ export default function TemplatesPage() {
       setFormBodyText('');
       setFormFooterText('');
       setFormButtons([]);
+      setFormBodySamples({});
+      setFormHeaderSample('');
     }
     setCreateOpen(true);
   }
@@ -220,36 +236,79 @@ export default function TemplatesPage() {
     }
 
     const sanitizedName = formName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    if (!/^[a-z0-9_]{1,512}$/.test(sanitizedName)) {
+      toast.error('Template name must contain only lowercase letters, digits, and underscores');
+      return;
+    }
+
+    for (let i = 0; i < bodyVariables.length; i++) {
+      if (bodyVariables[i] !== i + 1) {
+        toast.error(`Variables must be contiguous starting from {{1}} (found {{${bodyVariables[i]}}})`);
+        return;
+      }
+    }
+
+    const bodySamples: string[] = [];
+    for (let i = 1; i <= bodyVariables.length; i++) {
+      const val = formBodySamples[i]?.trim();
+      bodySamples.push(val || (i === 1 ? 'Customer' : i === 2 ? '1001' : `Value_${i}`));
+    }
+
+    const sample_values: { body?: string[]; header?: string[] } = {};
+    if (bodySamples.length > 0) {
+      sample_values.body = bodySamples;
+    }
+    if (formHeaderType === 'text' && formHeaderText.includes('{{1}}')) {
+      sample_values.header = [formHeaderSample.trim() || 'Notice'];
+    }
+
+    const payload = {
+      name: sanitizedName,
+      category: formCategory,
+      language: formLanguage,
+      header_type: formHeaderType === 'none' ? undefined : formHeaderType,
+      header_content: formHeaderType === 'text' ? formHeaderText.trim() : undefined,
+      header_media_url: ['image', 'video', 'document'].includes(formHeaderType)
+        ? formHeaderMediaUrl.trim() || undefined
+        : undefined,
+      body_text: formBodyText.trim(),
+      footer_text: formFooterText.trim() || undefined,
+      buttons: formButtons.length > 0 ? formButtons : undefined,
+      sample_values: Object.keys(sample_values).length > 0 ? sample_values : undefined,
+    };
+
     setSubmitting(true);
 
     try {
-      const res = await fetch('/api/whatsapp/templates', {
+      let res = await fetch('/api/whatsapp/templates/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: sanitizedName,
-          category: formCategory,
-          language: formLanguage,
-          header_format: formHeaderType,
-          header_content: formHeaderText,
-          header_media_url: formHeaderMediaUrl,
-          body_text: formBodyText,
-          footer_text: formFooterText,
-          buttons: formButtons,
-        }),
+        body: JSON.stringify(payload),
       });
+
+      if (!res.ok && res.status === 404) {
+        res = await fetch('/api/whatsapp/templates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to create template');
+        throw new Error(data.error || 'Failed to submit template to WhatsApp');
       }
 
-      toast.success('Template submitted to WhatsApp for approval!');
+      toast.success(
+        data.dry_run
+          ? 'Template saved locally (dry-run mode)'
+          : 'Template submitted to Meta WhatsApp for approval!'
+      );
       setCreateOpen(false);
       await fetchTemplates();
     } catch (err) {
-      console.error('Template create error:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to create template');
+      console.error('Template submit error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to submit template');
     } finally {
       setSubmitting(false);
     }
@@ -257,12 +316,15 @@ export default function TemplatesPage() {
 
   async function handleDelete(id: string) {
     try {
-      const res = await fetch(`/api/whatsapp/templates?id=${id}`, { method: 'DELETE' });
+      let res = await fetch(`/api/whatsapp/templates/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        res = await fetch(`/api/whatsapp/templates?id=${id}`, { method: 'DELETE' });
+      }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to delete');
+        throw new Error(data.error || 'Failed to delete template');
       }
-      toast.success('Template deleted');
+      toast.success('Template deleted successfully');
       setDeleteId(null);
       await fetchTemplates();
     } catch (err) {
@@ -625,6 +687,52 @@ export default function TemplatesPage() {
                 Use variables like <code className="bg-muted px-1 rounded">{"{{1}}"}</code> for contact name, order ID, etc.
               </p>
             </div>
+
+            {/* Dynamic Meta Review Sample Values */}
+            {bodyVariables.length > 0 && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2.5">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="size-3.5 text-primary" />
+                  <p className="text-xs font-semibold text-primary">
+                    WhatsApp Sample Values (Required by Meta)
+                  </p>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Meta requires realistic example values for each variable so human reviewers can approve your template.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {bodyVariables.map((v) => (
+                    <div key={v}>
+                      <Label className="text-[11px] font-medium text-foreground">
+                        Sample for {`{{${v}}}`}
+                      </Label>
+                      <Input
+                        value={formBodySamples[v] || ''}
+                        onChange={(e) =>
+                          setFormBodySamples((prev) => ({ ...prev, [v]: e.target.value }))
+                        }
+                        placeholder={v === 1 ? 'e.g. John Doe' : v === 2 ? 'e.g. #ORD-9821' : `e.g. Sample ${v}`}
+                        className="text-xs mt-1 bg-background"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {formHeaderType === 'text' && formHeaderText.includes('{{1}}') && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
+                <Label className="text-[11px] font-medium text-primary">
+                  Header Variable {"{{1}}"} Sample Value
+                </Label>
+                <Input
+                  value={formHeaderSample}
+                  onChange={(e) => setFormHeaderSample(e.target.value)}
+                  placeholder="e.g. Special Announcement"
+                  className="text-xs mt-1 bg-background"
+                />
+              </div>
+            )}
 
             <div>
               <Label className="text-xs">Footer Text (Optional)</Label>
