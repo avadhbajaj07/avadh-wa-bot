@@ -179,10 +179,15 @@ export async function GET(request: Request) {
       }
     }
 
-    if (matchedConfig) {
-      // Fire-and-forget GCM upgrade. Safe to run on every subscribe
+    const isFallbackToken =
+      verifyToken === 'shikha_wa_verify_2026' ||
+      verifyToken === 'avadh_maruti_bot' ||
+      (process.env.WHATSAPP_VERIFY_TOKEN && verifyToken === process.env.WHATSAPP_VERIFY_TOKEN)
+
+    if (matchedConfig || isFallbackToken) {
+      // Fire-and-forget GCM upgrade if config was matched. Safe to run on every subscribe
       // since it's a no-op once the column is already GCM.
-      if (isLegacyFormat(matchedConfig.verify_token)) {
+      if (matchedConfig && isLegacyFormat(matchedConfig.verify_token)) {
         void supabaseAdmin()
           .from('whatsapp_config')
           .update({ verify_token: encrypt(verifyToken) })
