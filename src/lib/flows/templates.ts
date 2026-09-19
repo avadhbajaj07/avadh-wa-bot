@@ -26,6 +26,7 @@ import type {
   KeywordTriggerConfig,
   SendButtonsNodeConfig,
   SendListNodeConfig,
+  SendMediaNodeConfig,
   SendMessageNodeConfig,
   StartNodeConfig,
 } from "./types";
@@ -35,6 +36,7 @@ export type FlowTemplateNodeType =
   | "send_message"
   | "send_buttons"
   | "send_list"
+  | "send_media"
   | "collect_input"
   | "condition"
   | "set_tag"
@@ -49,6 +51,7 @@ export interface FlowTemplateNode {
     | SendMessageNodeConfig
     | SendButtonsNodeConfig
     | SendListNodeConfig
+    | SendMediaNodeConfig
     | CollectInputNodeConfig
     | ConditionNodeConfig
     | HandoffNodeConfig
@@ -60,7 +63,7 @@ export interface FlowTemplate {
   name: string;
   description: string;
   /** Used by the gallery to surface a relevant icon. lucide-react name. */
-  icon: "MessageSquare" | "HelpCircle" | "UserPlus";
+  icon: "MessageSquare" | "HelpCircle" | "UserPlus" | "Video";
   trigger_type: "keyword" | "first_inbound_message" | "manual";
   trigger_config: KeywordTriggerConfig | Record<string, unknown>;
   entry_node_id: string;
@@ -286,6 +289,101 @@ const LEAD_CAPTURE: FlowTemplate = {
 };
 
 // ============================================================
+// 4. Video flow — Sudarshan Kriya benefits & video testimonials
+// ============================================================
+const VIDEO_FLOW: FlowTemplate = {
+  slug: "video_flow",
+  name: "Video",
+  description:
+    "सुदर्शन क्रिया (Sudarshan Kriya) के फायदे, वीडियो व्याख्यान एवं अनुभव। WhatsApp वीडियो कार्ड्स और 'और वीडियो देखें' रिप्लाई बटन के साथ।",
+  icon: "Video",
+  trigger_type: "keyword",
+  trigger_config: {
+    keywords: ["video", "videos", "sudarshan", "kriya", "ध्यान", "वीडियो", "सुदर्शन"],
+    match_type: "contains",
+  },
+  entry_node_id: "start",
+  nodes: [
+    {
+      node_key: "start",
+      node_type: "start",
+      config: { next_node_key: "kriya_intro" },
+    },
+    {
+      node_key: "kriya_intro",
+      node_type: "send_message",
+      config: {
+        text: `सुदर्शन क्रिया क्या है और इसके फायदे क्या हैं?\n\nसुदर्शन क्रिया एक शक्तिशाली श्वास-आधारित तकनीक है जो मन, शरीर और भावनाओं को शांत और संतुलित करने में मदद करती है।\n\nइसके प्रमुख फायदे:\n1. तनाव और चिंता को कम करती है।\n2. ऊर्जा और एकाग्रता को बढ़ाती है।\n3. नींद की गुणवत्ता में सुधार करती है।\n4. प्रतिरक्षा प्रणाली को मजबूत बनाती है।\n5. भावनात्मक संतुलन और सकारात्मकता लाती है।\n\nअधिक जानकारी के लिए संपर्क करें:\n72823 16090\n94066 33778`,
+        next_node_key: "video_1",
+      } as SendMessageNodeConfig,
+    },
+    {
+      node_key: "video_1",
+      node_type: "send_media",
+      config: {
+        media_type: "video",
+        media_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+        caption: "सुदर्शन क्रिया के बाद क्या होता है? | Sri Sri Ravi Shankar",
+        next_node_key: "video_1_btn",
+      } as SendMediaNodeConfig,
+    },
+    {
+      node_key: "video_1_btn",
+      node_type: "send_buttons",
+      config: {
+        text: "सुदर्शन क्रिया के और वीडियो और अनुभव देखने के लिए नीचे दिए गए बटन पर क्लिक करें:",
+        buttons: [
+          {
+            reply_id: "more_videos_1",
+            title: "और वीडियो देखें",
+            next_node_key: "video_2",
+          },
+        ],
+      } as SendButtonsNodeConfig,
+    },
+    {
+      node_key: "video_2",
+      node_type: "send_media",
+      config: {
+        media_type: "video",
+        media_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+        caption: "Find meditation tough? Here's a way out | Sri Sri Ravi Shankar",
+        next_node_key: "video_2_btn",
+      } as SendMediaNodeConfig,
+    },
+    {
+      node_key: "video_2_btn",
+      node_type: "send_buttons",
+      config: {
+        text: "अगला वीडियो देखने के लिए बटन दबाएँ:",
+        buttons: [
+          {
+            reply_id: "more_videos_2",
+            title: "और वीडियो देखें",
+            next_node_key: "video_3",
+          },
+        ],
+      } as SendButtonsNodeConfig,
+    },
+    {
+      node_key: "video_3",
+      node_type: "send_media",
+      config: {
+        media_type: "video",
+        media_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
+        caption: "सुदर्शन क्रिया के अनुभव और लाभ | Testimonial",
+        next_node_key: "end",
+      } as SendMediaNodeConfig,
+    },
+    {
+      node_key: "end",
+      node_type: "end",
+      config: {},
+    },
+  ],
+};
+
+// ============================================================
 // Registry
 // ============================================================
 
@@ -293,6 +391,7 @@ const TEMPLATES: Record<string, FlowTemplate> = {
   welcome_menu: WELCOME_MENU,
   faq_bot: FAQ_BOT,
   lead_capture: LEAD_CAPTURE,
+  video_flow: VIDEO_FLOW,
 };
 
 export function getFlowTemplate(slug: string): FlowTemplate | null {

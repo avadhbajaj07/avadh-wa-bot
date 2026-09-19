@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Radio, Plus, Loader2, RefreshCw, Megaphone, Download, FileText } from 'lucide-react';
+import { Radio, Plus, Loader2, RefreshCw, Megaphone, Download, FileText, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
@@ -285,15 +285,14 @@ export default function BroadcastsPage() {
           <Table>
             <TableHeader>
               <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="text-muted-foreground">{t('table.name')}</TableHead>
-                <TableHead className="hidden text-muted-foreground md:table-cell">{t('table.template')}</TableHead>
-                <TableHead className="hidden text-right text-muted-foreground sm:table-cell">
-                  {t('table.recipients')}
-                </TableHead>
-                <TableHead className="hidden text-muted-foreground lg:table-cell">{t('table.delivery')}</TableHead>
-                <TableHead className="hidden text-muted-foreground lg:table-cell">{t('table.read')}</TableHead>
-                <TableHead className="text-muted-foreground">{t('table.status')}</TableHead>
-                <TableHead className="hidden text-muted-foreground sm:table-cell">{t('table.date')}</TableHead>
+                <TableHead className="text-muted-foreground font-semibold">Campaign Name</TableHead>
+                <TableHead className="text-muted-foreground font-semibold">Template Name</TableHead>
+                <TableHead className="text-muted-foreground font-semibold text-center">Contacts</TableHead>
+                <TableHead className="text-muted-foreground font-semibold text-center">Type</TableHead>
+                <TableHead className="text-muted-foreground font-semibold text-center">Status</TableHead>
+                <TableHead className="text-muted-foreground font-semibold text-center">Created At</TableHead>
+                <TableHead className="text-muted-foreground font-semibold text-center">Delete</TableHead>
+                <TableHead className="text-muted-foreground font-semibold text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -302,47 +301,70 @@ export default function BroadcastsPage() {
                 return (
                   <TableRow
                     key={broadcast.id}
-                    className="cursor-pointer border-border hover:bg-muted/50"
-                    onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
+                    className="border-border hover:bg-muted/50 transition-colors"
                   >
-                    <TableCell className="font-medium text-foreground">
-                      {broadcast.name}
+                    <TableCell className="font-semibold text-foreground">
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
+                        className="hover:text-primary transition-colors text-left"
+                      >
+                        {broadcast.name}
+                      </button>
                     </TableCell>
-                    <TableCell className="hidden text-muted-foreground md:table-cell">
+                    <TableCell className="text-muted-foreground font-mono text-xs">
                       {broadcast.template_name}
                     </TableCell>
-                    <TableCell className="hidden text-right text-muted-foreground tabular-nums sm:table-cell">
+                    <TableCell className="text-center tabular-nums text-foreground font-medium">
                       {broadcast.total_recipients}
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      <RateCell
-                        value={broadcast.delivered_count}
-                        total={broadcast.total_recipients}
-                        color="bg-primary"
-                      />
+                    <TableCell className="text-center">
+                      <span className="text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
+                        BROADCAST
+                      </span>
                     </TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      <RateCell
-                        value={broadcast.read_count}
-                        total={broadcast.total_recipients}
-                        color="bg-blue-500"
-                      />
-                    </TableCell>
-                    <TableCell>
+                    <TableCell className="text-center">
                       <span
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${status.classes}`}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${status.classes}`}
                       >
-                        {status.pulse && (
-                          <span className="relative flex h-1.5 w-1.5">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-yellow-400 opacity-75" />
-                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-yellow-400" />
-                          </span>
-                        )}
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
                         {tStatus(status.label)}
                       </span>
                     </TableCell>
-                    <TableCell className="hidden text-muted-foreground sm:table-cell">
+                    <TableCell className="text-center text-xs text-muted-foreground">
                       {new Date(broadcast.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm(`Are you sure you want to delete campaign "${broadcast.name}"?`)) return;
+                          try {
+                            const supabase = createClient();
+                            const { error: delErr } = await supabase.from('broadcasts').delete().eq('id', broadcast.id);
+                            if (delErr) throw delErr;
+                            setBroadcasts((prev) => prev.filter((b) => b.id !== broadcast.id));
+                            toast.success('Campaign deleted');
+                          } catch (err: unknown) {
+                            toast.error(err instanceof Error ? err.message : 'Failed to delete campaign');
+                          }
+                        }}
+                        className="inline-flex size-8 items-center justify-center rounded-lg text-red-500 hover:bg-red-500/10 transition-colors"
+                        title="Delete campaign"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
+                        className="text-primary hover:text-primary hover:bg-primary/10 text-xs font-semibold"
+                      >
+                        View Insight
+                      </Button>
                     </TableCell>
                   </TableRow>
                 );

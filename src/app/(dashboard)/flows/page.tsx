@@ -15,6 +15,7 @@ import {
   Archive,
   HelpCircle,
   UserPlus,
+  Video,
   FileText,
 } from "lucide-react";
 
@@ -71,7 +72,7 @@ interface TemplateSummary {
   slug: string;
   name: string;
   description: string;
-  icon: "MessageSquare" | "HelpCircle" | "UserPlus";
+  icon: "MessageSquare" | "HelpCircle" | "UserPlus" | "Video";
   trigger_type: string;
   node_count: number;
 }
@@ -80,6 +81,7 @@ const TEMPLATE_ICONS = {
   MessageSquare,
   HelpCircle,
   UserPlus,
+  Video,
 } as const;
 
 export default function FlowsPage() {
