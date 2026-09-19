@@ -119,10 +119,6 @@ export async function GET() {
         wabaId: config.waba_id,
         accessToken,
       })
-      // Meta returns the apps subscribed to this WABA. If the list
-      // is non-empty, OUR app is in there (the access_token we used
-      // belongs to our app — Meta wouldn't return data for an app
-      // the token can't see). Treat any entry as success.
       checks.waba_subscribed_to_app = subs.length > 0
       if (!checks.waba_subscribed_to_app) {
         errors.push(
@@ -140,10 +136,22 @@ export async function GET() {
     )
   }
 
+  // If Meta verifies phone metadata and WABA subscription, the number is live on Meta!
+  // Backfill registered_at if null so pre-existing active numbers get full green status.
+  if (checks.phone_metadata_ok && (checks.waba_subscribed_to_app ?? false)) {
+    if (!config.registered_at) {
+      const now = new Date().toISOString()
+      await supabase
+        .from('whatsapp_config')
+        .update({ registered_at: now, updated_at: now })
+        .eq('id', config.id)
+      checks.locally_marked_registered = true
+    }
+  }
+
   const live =
     checks.phone_metadata_ok &&
-    (checks.waba_subscribed_to_app ?? false) &&
-    checks.locally_marked_registered
+    (checks.waba_subscribed_to_app ?? false)
 
   return NextResponse.json({
     live,

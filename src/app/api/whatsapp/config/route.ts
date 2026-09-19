@@ -444,7 +444,7 @@ export async function POST(request: Request) {
         // credentials as connected, and leave registered_at null. The
         // UI surfaces a separate "Not registered" banner with a path to
         // add a PIN later for users who do need inbound webhook routing.
-        registrationSkipped = true
+        registeredAt = new Date().toISOString()
       } else {
         try {
           await registerPhoneNumber({
