@@ -85,11 +85,24 @@ describe('claimBroadcastDelivery', () => {
       'bc-1',
       new Date('2026-08-11T12:00:00Z'),
     );
-    // 30 minutes before "now" — a pass whose process died is recoverable
+    // 2 minutes before "now" — a pass whose process died is recoverable
     // without touching the database by hand.
     expect(calls[0].or).toBe(
-      'delivery_locked_at.is.null,delivery_locked_at.lt.2026-08-11T11:30:00.000Z',
+      'delivery_locked_at.is.null,delivery_locked_at.lt.2026-08-11T11:58:00.000Z',
     );
+  });
+
+  it('bypasses stale check when force is true', async () => {
+    const calls: ClaimCall[] = [];
+    await claimBroadcastDelivery(
+      claimDb([{ id: 'bc-1' }], calls),
+      'acct-1',
+      'bc-1',
+      new Date('2026-08-11T12:00:00Z'),
+      true,
+    );
+    expect(calls[0].or).toBeUndefined();
+    expect(calls[0].filters).toEqual({ id: 'bc-1', account_id: 'acct-1' });
   });
 
   it('is scoped to the account, so another tenant cannot claim it', async () => {
@@ -223,6 +236,30 @@ describe('planBroadcastResume', () => {
     expect(plan.accessToken).toBe('decrypted:tok');
     expect(remaining).toBe(0);
     expect(unsendable).toBe(0);
+  });
+
+  it('formats raw Indian mobile numbers and numbers with leading 0', async () => {
+    const { plan, unsendable } = await planBroadcastResume(
+      planDb({
+        broadcast: BROADCAST,
+        config: CONFIG,
+        recipients: [
+          recipient('r1', '9406633778'),
+          recipient('r2', '09406633778'),
+          recipient('r3', '+91 94066 33778'),
+        ],
+      }),
+      'acct-1',
+      'bc-1',
+      'pending',
+    );
+
+    expect(unsendable).toBe(0);
+    expect(plan.planned.map((p) => p.phone)).toEqual([
+      '919406633778',
+      '919406633778',
+      '919406633778',
+    ]);
   });
 
   it('scopes to failed rows when retrying, and to both for "all"', async () => {

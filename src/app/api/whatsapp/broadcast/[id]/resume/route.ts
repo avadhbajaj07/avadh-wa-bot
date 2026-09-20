@@ -65,12 +65,15 @@ export async function POST(
       ? body.scope
       : 'pending';
 
+    const force = Boolean(body?.force);
+
     // Claim BEFORE planning. Two clicks on Resume, or a click while an
     // earlier pass is still running, would otherwise both build a plan
     // from the same 'pending' rows and message everyone twice — and a
     // WhatsApp message cannot be recalled. The claim is one conditional
-    // UPDATE, so exactly one caller wins.
-    const claimed = await claimBroadcastDelivery(supabase, accountId, id);
+    // UPDATE, so exactly one caller wins. If `force` is true, stale lock
+    // check is bypassed.
+    const claimed = await claimBroadcastDelivery(supabase, accountId, id, new Date(), force);
     if (!claimed) {
       return NextResponse.json(
         {

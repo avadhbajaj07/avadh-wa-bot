@@ -198,6 +198,17 @@ export default function BroadcastDetailPage() {
     fetchData();
   }, [fetchData]);
 
+  // Poll for updates while broadcast is actively sending or being resumed
+  useEffect(() => {
+    if (broadcast?.status !== 'sending' && resumingScope === null) return;
+
+    const interval = setInterval(() => {
+      fetchData();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [broadcast?.status, resumingScope, fetchData]);
+
   const filteredRecipients = useMemo(
     () =>
       statusFilter === 'all'
@@ -239,22 +250,35 @@ export default function BroadcastDetailPage() {
    * stuck 'sending'. This is the recovery, and the same call retries
    * failed recipients.
    */
-  async function handleResume(scope: 'pending' | 'failed') {
+  async function handleResume(scope: 'pending' | 'failed', force: boolean = false) {
     setResumingScope(scope);
     try {
       const res = await fetch(`/api/whatsapp/broadcast/${broadcastId}/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope }),
+        body: JSON.stringify({ scope, force }),
       });
       const payload = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        toast.error(
-          t('toastResumeFailed', {
-            error: payload?.error || `HTTP ${res.status}`,
-          }),
-        );
+        if (res.status === 409) {
+          toast.error(
+            'A delivery pass is currently locked or running. You can wait a moment or force retry.',
+            {
+              action: {
+                label: 'Force Retry',
+                onClick: () => handleResume(scope, true),
+              },
+              duration: 8000,
+            }
+          );
+        } else {
+          toast.error(
+            t('toastResumeFailed', {
+              error: payload?.error || `HTTP ${res.status}`,
+            }),
+          );
+        }
         return;
       }
 
@@ -451,18 +475,22 @@ export default function BroadcastDetailPage() {
             )}
             {retryableCount > 0 && (
               <Button
-                variant="outline"
                 size="sm"
+                variant={pendingCount === 0 ? 'default' : 'outline'}
                 onClick={() => handleResume('failed')}
                 disabled={resumingScope !== null}
-                className="border-border text-muted-foreground hover:bg-muted"
+                className={
+                  pendingCount === 0
+                    ? 'bg-rose-600 text-white hover:bg-rose-700 font-medium'
+                    : 'border-border text-muted-foreground hover:bg-muted'
+                }
               >
                 {resumingScope === 'failed' ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <RotateCcw className="h-3.5 w-3.5" />
                 )}
-                {t('retryFailed', { count: retryableCount })}
+                {`Retry All Failed Messages (${retryableCount.toLocaleString()})`}
               </Button>
             )}
           </div>

@@ -29,6 +29,7 @@ import {
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body';
 import type { MessageTemplate } from '@/types';
 import { findOrCreateContact } from '@/lib/api/v1/contacts';
+import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
 export class BroadcastError extends Error {
@@ -255,35 +256,56 @@ export async function createBroadcast(
  * here — only the terminal `status` — otherwise a manual value would
  * race and clobber the trigger-maintained counts.
  */
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimitError(message: string): boolean {
+  return /rate limit|too many calls|#131056|#131048|#80007|429/i.test(message);
+}
+
 export async function deliverBroadcast(
   db: SupabaseClient,
   plan: BroadcastPlan
 ): Promise<void> {
-  for (const recipient of plan.planned) {
-    const variants = phoneVariants(recipient.phone);
+  for (let i = 0; i < plan.planned.length; i++) {
+    const recipient = plan.planned[i];
+    const formatted = formatPhoneNumber(recipient.phone) || recipient.phone;
+    const sanitized = sanitizePhoneForMeta(formatted);
+    const variants = phoneVariants(sanitized || recipient.phone);
     let sentMessageId: string | null = null;
     let lastError: string | null = null;
 
     for (const variant of variants) {
-      try {
-        const result = await sendTemplateMessage({
-          phoneNumberId: plan.phoneNumberId,
-          accessToken: plan.accessToken,
-          to: variant,
-          templateName: plan.templateName,
-          language: plan.templateLanguage,
-          template: plan.templateRow ?? undefined,
-          params: recipient.params,
-        });
-        sentMessageId = result.messageId;
-        lastError = null;
-        break;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        lastError = message;
-        // Only a "recipient not allowed" error is worth another variant.
-        if (!isRecipientNotAllowedError(message)) break;
+      let attempts = 0;
+      while (attempts < 3) {
+        attempts++;
+        try {
+          const result = await sendTemplateMessage({
+            phoneNumberId: plan.phoneNumberId,
+            accessToken: plan.accessToken,
+            to: variant,
+            templateName: plan.templateName,
+            language: plan.templateLanguage,
+            template: plan.templateRow ?? undefined,
+            params: recipient.params,
+          });
+          sentMessageId = result.messageId;
+          lastError = null;
+          break;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          lastError = message;
+          if (isRateLimitError(message) && attempts < 3) {
+            // Back off on rate limit: 2s on 1st retry, 4s on 2nd retry
+            await sleep(attempts * 2000);
+            continue;
+          }
+          // Only a "recipient not allowed" error is worth trying the next variant.
+          if (!isRecipientNotAllowedError(message)) break;
+        }
       }
+      if (sentMessageId) break;
     }
 
     if (sentMessageId) {
@@ -305,9 +327,19 @@ export async function deliverBroadcast(
         })
         .eq('id', recipient.recipientRowId);
     }
+
+    // 50ms pacing between recipients to prevent tripping Meta's API burst limits
+    if (i < plan.planned.length - 1) {
+      await sleep(50);
+    }
   }
 
   await finalizeBroadcastStatus(db, plan.broadcastId);
+  try {
+    await db.rpc('recompute_broadcast_counts', { bid: plan.broadcastId });
+  } catch {
+    // Best-effort count recompute
+  }
 }
 
 /**

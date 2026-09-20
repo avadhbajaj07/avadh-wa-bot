@@ -126,7 +126,7 @@ export const RATE_LIMITS = {
    *  failed recipient (issue #472). 60/min per user carries the wizard's
    *  pacing with headroom while still bounding a script in a loop;
    *  Meta's own per-number limits remain the real throughput ceiling. */
-  broadcast: { limit: 60, windowMs: 60_000 },
+  broadcast: { limit: 120, windowMs: 60_000 },
   /** Reaction add/swap/remove. More permissive than send — users
    *  fidget with reactions and a single "swap" is actually two calls
    *  (remove + add) under the hood. */

@@ -22,6 +22,7 @@ import { BroadcastError, type BroadcastPlan } from '@/lib/whatsapp/broadcast-cor
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
+import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 
 /** Which recipients a resume pass picks up. */
 export type ResumeScope = 'pending' | 'failed' | 'all';
@@ -46,9 +47,10 @@ export const RESUME_MAX_PER_REQUEST = 1000;
  * How long a `delivery_locked_at` stamp is honoured before it is read
  * as abandoned. Long enough that a legitimately slow pass is never
  * stolen from, short enough that a crashed one doesn't wedge the
- * campaign until someone touches the database.
+ * campaign until someone touches the database. 2 minutes matches
+ * serverless execution bounds with safety headroom.
  */
-export const DELIVERY_LOCK_STALE_MS = 30 * 60 * 1000;
+export const DELIVERY_LOCK_STALE_MS = 2 * 60 * 1000;
 
 function scopeStatuses(scope: ResumeScope): string[] {
   if (scope === 'pending') return ['pending'];
@@ -63,24 +65,32 @@ function scopeStatuses(scope: ResumeScope): string[] {
  * WHERE no longer matches and it gets `false`. Returns false when the
  * broadcast doesn't exist on this account, too — the caller treats both
  * as "not yours to run".
+ *
+ * If `force` is true, the stale lock condition is bypassed (e.g. user
+ * clicks "Force Retry" after a previous pass stalled).
  */
 export async function claimBroadcastDelivery(
   db: SupabaseClient,
   accountId: string,
   broadcastId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  force: boolean = false
 ): Promise<boolean> {
   const staleCutoff = new Date(
     now.getTime() - DELIVERY_LOCK_STALE_MS
   ).toISOString();
 
-  const { data, error } = await db
+  let query = db
     .from('broadcasts')
     .update({ delivery_locked_at: now.toISOString() })
     .eq('id', broadcastId)
-    .eq('account_id', accountId)
-    .or(`delivery_locked_at.is.null,delivery_locked_at.lt.${staleCutoff}`)
-    .select('id');
+    .eq('account_id', accountId);
+
+  if (!force) {
+    query = query.or(`delivery_locked_at.is.null,delivery_locked_at.lt.${staleCutoff}`);
+  }
+
+  const { data, error } = await query.select('id');
 
   if (error) {
     console.error('[broadcast-resume] claim failed:', error.message);
@@ -175,10 +185,15 @@ export async function planBroadcastResume(
   // A recipient whose contact has no usable phone can never send. Stamp
   // it failed now: leaving it 'pending' would keep the broadcast in
   // 'sending' forever, which is the very symptom being fixed.
+  // Format numbers with formatPhoneNumber first so standard 10-digit Indian
+  // numbers or numbers with leading 0 (e.g. 09406633778) are properly
+  // converted to +91 before validation.
   const sendable: RecipientRow[] = [];
   const unsendable: string[] = [];
   for (const row of rows) {
-    const sanitized = sanitizePhoneForMeta(contactPhone(row) ?? '');
+    const raw = contactPhone(row) ?? '';
+    const formatted = formatPhoneNumber(raw) || raw;
+    const sanitized = sanitizePhoneForMeta(formatted);
     if (isValidE164(sanitized)) sendable.push(row);
     else unsendable.push(row.id);
   }
@@ -203,6 +218,21 @@ export async function planBroadcastResume(
         : 'This broadcast has no recipients left to send',
       400
     );
+  }
+
+  // When retrying failed recipients, reset them to 'pending' so the
+  // funnel accurately reflects that they are in-flight again
+  if (scope === 'failed' || scope === 'all') {
+    const sliceIds = slice.map((r) => r.id);
+    if (sliceIds.length > 0) {
+      await db
+        .from('broadcast_recipients')
+        .update({
+          status: 'pending',
+          error_message: null,
+        })
+        .in('id', sliceIds);
+    }
   }
 
   const { data: config, error: configError } = await db
@@ -239,13 +269,17 @@ export async function planBroadcastResume(
     phoneNumberId: config.phone_number_id,
     accessToken: decrypt(config.access_token),
     templateRow: resolvedTemplate.row,
-    planned: slice.map((row) => ({
-      recipientRowId: row.id,
-      phone: sanitizePhoneForMeta(contactPhone(row) ?? ''),
-      params: Array.isArray(row.template_params)
-        ? row.template_params.filter((p): p is string => typeof p === 'string')
-        : [],
-    })),
+    planned: slice.map((row) => {
+      const raw = contactPhone(row) ?? '';
+      const formatted = formatPhoneNumber(raw) || raw;
+      return {
+        recipientRowId: row.id,
+        phone: sanitizePhoneForMeta(formatted),
+        params: Array.isArray(row.template_params)
+          ? row.template_params.filter((p): p is string => typeof p === 'string')
+          : [],
+      };
+    }),
     rejected: 0,
   };
 
