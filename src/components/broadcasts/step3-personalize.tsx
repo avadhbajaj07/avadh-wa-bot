@@ -12,7 +12,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowLeft, ArrowRight, Eye, ImageIcon, Loader2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Eye,
+  ImageIcon,
+  Loader2,
+  Upload,
+  FileText,
+  Video,
+  CheckCircle2,
+  Trash2,
+  ExternalLink,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  uploadAccountMedia,
+  MEDIA_MAX_BYTES_BY_KIND,
+} from '@/lib/storage/upload-media';
 import { useTranslations } from 'next-intl';
 
 type VariableType = 'static' | 'field' | 'custom_field';
@@ -84,6 +101,31 @@ export function Step3Personalize({
     Map<string, string>
   >(new Map());
   const [loadingPreview, setLoadingPreview] = useState(true);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [showManualUrl, setShowManualUrl] = useState(false);
+
+  async function handleMediaUpload(file: File) {
+    if (!mediaHeaderType) return;
+    const maxBytes = MEDIA_MAX_BYTES_BY_KIND[mediaHeaderType];
+    if (file.size > maxBytes) {
+      toast.error(
+        `File too large. Maximum size for ${mediaHeaderType} is ${(maxBytes / (1024 * 1024)).toFixed(0)} MB.`
+      );
+      return;
+    }
+    setIsUploadingMedia(true);
+    try {
+      const { publicUrl } = await uploadAccountMedia('chat-media', file);
+      onHeaderMediaUrlChange(publicUrl);
+      setUploadedFileName(file.name);
+      toast.success(`${mediaHeaderType.toUpperCase()} uploaded successfully!`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to upload media');
+    } finally {
+      setIsUploadingMedia(false);
+    }
+  }
 
   // Load user's custom fields + a representative contact for the
   // live preview. Fall back to sample data if no contacts exist yet.
@@ -243,39 +285,153 @@ export function Step3Personalize({
       </div>
 
       {mediaHeaderType && (
-        <div className="rounded-xl border border-border bg-card/50 p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <ImageIcon className="h-4 w-4 text-primary" />
-            <p className="text-sm font-medium text-foreground">{t('personalize.headerImage')}</p>
-            <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium uppercase text-primary">
-              {mediaHeaderType}
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {mediaHeaderType === 'image' && <ImageIcon className="h-4 w-4 text-primary" />}
+              {mediaHeaderType === 'video' && <Video className="h-4 w-4 text-primary" />}
+              {mediaHeaderType === 'document' && <FileText className="h-4 w-4 text-primary" />}
+              <p className="text-sm font-medium text-foreground">
+                Header {mediaHeaderType.charAt(0).toUpperCase() + mediaHeaderType.slice(1)}
+              </p>
+              <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium uppercase text-primary">
+                {mediaHeaderType}
+              </span>
+            </div>
+            <span className="text-[11px] text-muted-foreground">
+              Max {mediaHeaderType === 'image' ? '5 MB' : '16 MB'}
             </span>
           </div>
-          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-            {t('personalize.imageUrl')}
-          </label>
-          <Input
-            type="url"
-            value={headerMediaUrl}
-            onChange={(e) => onHeaderMediaUrlChange(e.target.value)}
-            placeholder={t('personalize.imageUrlPlaceholder')}
-            className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
-          />
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            {t('personalize.headerImageDesc')}
-          </p>
-          {mediaHeaderType === 'image' &&
-            headerMediaError === null &&
-            headerMediaUrl.trim() && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={headerMediaUrl.trim()}
-                alt={t('personalize.headerPreviewAlt')}
-                className="mt-3 max-h-40 rounded-lg border border-border object-contain"
-              />
-            )}
+
+          {/* Uploaded media preview & action */}
+          {headerMediaUrl.trim() ? (
+            <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 truncate">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <span className="text-xs font-medium text-foreground truncate">
+                    {uploadedFileName || 'Media attached'}
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    onHeaderMediaUrlChange('');
+                    setUploadedFileName(null);
+                  }}
+                  className="h-7 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1" />
+                  Remove
+                </Button>
+              </div>
+
+              {mediaHeaderType === 'image' && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={headerMediaUrl.trim()}
+                  alt={t('personalize.headerPreviewAlt')}
+                  className="max-h-48 rounded-lg border border-border object-contain bg-black/20"
+                />
+              )}
+              {mediaHeaderType === 'video' && (
+                <video
+                  src={headerMediaUrl.trim()}
+                  controls
+                  className="max-h-48 rounded-lg border border-border bg-black/20"
+                />
+              )}
+              {mediaHeaderType === 'document' && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
+                  <FileText className="h-4 w-4 text-primary" />
+                  <a
+                    href={headerMediaUrl.trim()}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline text-primary hover:text-primary/80 flex items-center gap-1"
+                  >
+                    View Document <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Upload Zone */
+            <div className="space-y-2">
+              <label
+                className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 transition-colors cursor-pointer ${
+                  isUploadingMedia
+                    ? 'border-primary/50 bg-primary/5 cursor-wait'
+                    : 'border-border hover:border-primary/50 hover:bg-muted/50'
+                }`}
+              >
+                <input
+                  type="file"
+                  className="sr-only"
+                  disabled={isUploadingMedia}
+                  accept={
+                    mediaHeaderType === 'image'
+                      ? 'image/jpeg,image/png'
+                      : mediaHeaderType === 'video'
+                        ? 'video/mp4,video/3gpp'
+                        : 'application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                  }
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleMediaUpload(file);
+                    e.target.value = '';
+                  }}
+                />
+                {isUploadingMedia ? (
+                  <div className="flex flex-col items-center gap-2 text-center">
+                    <Loader2 className="h-7 w-7 animate-spin text-primary" />
+                    <p className="text-xs font-medium text-foreground">
+                      Uploading to internal storage...
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-1.5 text-center">
+                    <div className="rounded-full bg-primary/10 p-2 text-primary">
+                      <Upload className="h-5 w-5" />
+                    </div>
+                    <p className="text-xs font-medium text-foreground">
+                      Click to upload {mediaHeaderType} from computer
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Stored in your dedicated workspace memory. No external links required!
+                    </p>
+                  </div>
+                )}
+              </label>
+
+              {/* Toggle manual URL input if needed */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowManualUrl(!showManualUrl)}
+                  className="text-[11px] text-muted-foreground hover:text-foreground underline"
+                >
+                  {showManualUrl ? 'Hide manual URL input' : 'Or enter external media URL manually'}
+                </button>
+                {showManualUrl && (
+                  <div className="mt-2 space-y-1">
+                    <Input
+                      type="url"
+                      value={headerMediaUrl}
+                      onChange={(e) => onHeaderMediaUrlChange(e.target.value)}
+                      placeholder={t('personalize.imageUrlPlaceholder')}
+                      className="border-border bg-muted text-foreground placeholder:text-muted-foreground text-xs"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {headerMediaError && (
-            <p className="mt-1.5 text-xs text-amber-300">
+            <p className="text-xs text-amber-300">
               {headerMediaError === 'missing'
                 ? t('personalize.mediaUrlRequired')
                 : t('personalize.mediaUrlInvalid')}

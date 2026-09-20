@@ -28,6 +28,9 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  Clock,
+  Smartphone,
+  Calendar,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
@@ -50,6 +53,10 @@ interface Step4Props {
   template: MessageTemplate;
   audience: AudienceConfig;
   onAudienceChange?: (audience: AudienceConfig) => void;
+  variables?: Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>;
+  headerMediaUrl?: string;
+  scheduledAt?: string | null;
+  onScheduleChange?: (date: string | null) => void;
   onSend: () => void;
   onSaveDraft?: () => void;
   onBack: () => void;
@@ -63,6 +70,10 @@ export function Step4ScheduleSend({
   template,
   audience,
   onAudienceChange,
+  variables,
+  headerMediaUrl,
+  scheduledAt,
+  onScheduleChange,
   onSend,
   onSaveDraft,
   onBack,
@@ -73,6 +84,52 @@ export function Step4ScheduleSend({
   const [showConfirm, setShowConfirm] = useState(false);
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
+
+  const [testPhone, setTestPhone] = useState('');
+  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [scheduleMode, setScheduleMode] = useState<'now' | 'later'>(
+    scheduledAt ? 'later' : 'now'
+  );
+
+  async function handleSendTest() {
+    if (!testPhone.trim()) {
+      toast.error('Please enter a test phone number with country code (e.g. +91...)');
+      return;
+    }
+    setIsSendingTest(true);
+    try {
+      const params: string[] = [];
+      if (variables) {
+        const keys = Object.keys(variables).sort((a, b) => Number(a) - Number(b));
+        for (const k of keys) {
+          params.push(variables[k]?.value || 'Sample');
+        }
+      }
+
+      const res = await fetch('/api/whatsapp/broadcast/test-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: testPhone.trim(),
+          template_name: template.name,
+          template_language: template.language || 'en_US',
+          params,
+          header_media_url: headerMediaUrl || undefined,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.error || 'Failed to send test message');
+      }
+
+      toast.success(`Sample message sent to ${testPhone.trim()}! Check your WhatsApp.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not send test message');
+    } finally {
+      setIsSendingTest(false);
+    }
+  }
 
   // Tags for optional auto-apply & exclude
   const [tags, setTags] = useState<Tag[]>([]);
@@ -444,6 +501,119 @@ export function Step4ScheduleSend({
         </div>
       )}
 
+      {/* Send Sample / Test Message */}
+      <div className="rounded-xl border border-border bg-card/40 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Smartphone className="h-4 w-4 text-primary" />
+          <p className="text-sm font-medium text-foreground">Send Test / Sample Message</p>
+          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+            Recommended
+          </Badge>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Send a real preview of this template to your own phone number before sending to all {estimatedReach.toLocaleString()} recipients.
+        </p>
+        <div className="flex items-center gap-2 pt-1">
+          <Input
+            value={testPhone}
+            onChange={(e) => setTestPhone(e.target.value)}
+            placeholder="e.g. +919876543210"
+            className="h-9 max-w-xs text-xs bg-muted border-border"
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleSendTest}
+            disabled={!testPhone.trim() || isSendingTest}
+            className="h-9 text-xs font-medium"
+          >
+            {isSendingTest ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+            ) : (
+              <Send className="h-3.5 w-3.5 mr-1.5 text-primary" />
+            )}
+            Send Sample Message
+          </Button>
+        </div>
+      </div>
+
+      {/* Schedule Options */}
+      <div className="rounded-xl border border-border bg-card/40 p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Clock className="h-4 w-4 text-primary" />
+          <p className="text-sm font-medium text-foreground">Delivery Schedule</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <button
+            type="button"
+            onClick={() => {
+              setScheduleMode('now');
+              if (onScheduleChange) onScheduleChange(null);
+            }}
+            className={`flex flex-col items-start rounded-lg border p-3 text-left transition-all ${
+              scheduleMode === 'now'
+                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
+                : 'border-border bg-muted/30 text-muted-foreground hover:border-border'
+            }`}
+          >
+            <div className="flex items-center gap-2 font-medium text-xs text-foreground">
+              <Send className="h-3.5 w-3.5 text-primary" />
+              Send Immediately
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Start delivering messages as soon as you confirm.
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setScheduleMode('later');
+              if (!scheduledAt && onScheduleChange) {
+                const d = new Date(Date.now() + 60 * 60 * 1000);
+                onScheduleChange(d.toISOString());
+              }
+            }}
+            className={`flex flex-col items-start rounded-lg border p-3 text-left transition-all ${
+              scheduleMode === 'later'
+                ? 'border-primary bg-primary/10 text-foreground ring-1 ring-primary/30'
+                : 'border-border bg-muted/30 text-muted-foreground hover:border-border'
+            }`}
+          >
+            <div className="flex items-center gap-2 font-medium text-xs text-foreground">
+              <Calendar className="h-3.5 w-3.5 text-primary" />
+              Schedule for Later
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Pick a date & time to automatically deliver this broadcast.
+            </p>
+          </button>
+        </div>
+
+        {scheduleMode === 'later' && (
+          <div className="pt-2 border-t border-border space-y-1.5">
+            <label className="text-xs font-medium text-foreground">
+              Select Date and Time
+            </label>
+            <Input
+              type="datetime-local"
+              value={scheduledAt ? new Date(scheduledAt).toISOString().slice(0, 16) : ''}
+              min={new Date().toISOString().slice(0, 16)}
+              onChange={(e) => {
+                if (onScheduleChange) {
+                  onScheduleChange(e.target.value ? new Date(e.target.value).toISOString() : null);
+                }
+              }}
+              className="h-9 max-w-xs text-xs bg-muted border-border"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Campaign will be stored safely and can be monitored or launched early anytime from Broadcasts.
+            </p>
+          </div>
+        )}
+      </div>
+
       {/* Processing overlay */}
       {isProcessing && (
         <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
@@ -487,52 +657,69 @@ export function Step4ScheduleSend({
             </Button>
           )}
 
-          <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
-            <DialogTrigger
-              render={
-                <Button
-                  disabled={!name.trim() || isProcessing}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                />
-              }
+          {scheduleMode === 'later' ? (
+            <Button
+              onClick={() => {
+                if (!scheduledAt) {
+                  toast.error('Please select a date and time for the scheduled broadcast.');
+                  return;
+                }
+                onSend();
+              }}
+              disabled={!name.trim() || isProcessing || !scheduledAt}
+              className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
-              <Send className="h-4 w-4" />
-              {t('scheduleSend.sendNow')}
-            </DialogTrigger>
-            <DialogContent className="border-border bg-popover sm:max-w-md">
-              <DialogHeader>
-                <DialogTitle className="text-popover-foreground">{t('scheduleSend.confirmTitle')}</DialogTitle>
-                <DialogDescription className="text-muted-foreground">
-                  {t.rich('scheduleSend.confirmDesc', {
-                    count: estimatedReach,
-                    template: template.name,
-                    b: (chunks) => (
-                      <span className="font-medium text-popover-foreground">{chunks}</span>
-                    ),
-                  })}
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowConfirm(false)}
-                  className="border-border text-muted-foreground"
-                >
-                  {t('cancel')}
-                </Button>
-                <Button
-                  onClick={() => {
-                    setShowConfirm(false);
-                    onSend();
-                  }}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90"
-                >
-                  <Send className="h-4 w-4" />
-                  {t('scheduleSend.sendNow')}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              <Clock className="h-4 w-4 mr-1.5" />
+              Schedule Broadcast
+            </Button>
+          ) : (
+            <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
+              <DialogTrigger
+                render={
+                  <Button
+                    disabled={!name.trim() || isProcessing}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  />
+                }
+              >
+                <Send className="h-4 w-4 mr-1.5" />
+                {t('scheduleSend.sendNow')}
+              </DialogTrigger>
+              <DialogContent className="border-border bg-popover sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="text-popover-foreground">{t('scheduleSend.confirmTitle')}</DialogTitle>
+                  <DialogDescription className="text-muted-foreground">
+                    {t.rich('scheduleSend.confirmDesc', {
+                      count: estimatedReach,
+                      template: template.name,
+                      b: (chunks) => (
+                        <span className="font-medium text-popover-foreground">{chunks}</span>
+                      ),
+                    })}
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowConfirm(false)}
+                    className="border-border text-muted-foreground"
+                  >
+                    {t('cancel')}
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setShowConfirm(false);
+                      onSend();
+                    }}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    <Send className="h-4 w-4 mr-1.5" />
+                    {t('scheduleSend.sendNow')}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
       </div>
     </div>

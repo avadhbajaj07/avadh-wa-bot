@@ -112,14 +112,19 @@ export default function TemplatesPage() {
 
   async function handleCreateFlowFromButton(template: MessageTemplate, buttonText: string) {
     try {
+      const rawText = (buttonText || '').trim();
+      // Remove any parenthetical suffixes like "(optional)" or "(click here)"
+      const cleaned = rawText.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+      const keywords = Array.from(new Set([rawText, cleaned])).filter(Boolean);
+
       const res = await fetch('/api/flows', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: `Flow: ${buttonText}`,
-          description: `Triggered when customer clicks "${buttonText}" in template "${template.name}"`,
+          name: `Flow: ${cleaned || rawText || template.name}`,
+          description: `Triggered when customer clicks "${rawText}" in template "${template.name}"`,
           trigger_type: 'keyword',
-          trigger_config: { keywords: [buttonText], matching: 'contains' },
+          trigger_config: { keywords, match_type: 'contains' },
           entry_node_id: 'start_1',
           nodes: [
             {
@@ -133,7 +138,7 @@ export default function TemplatesPage() {
               node_key: 'msg_1',
               node_type: 'send_message',
               config: {
-                text: `Hello! You clicked "${buttonText}". Here are the details:`,
+                text: `Hello! You clicked "${rawText}". Here are the details:`,
                 next_node_key: 'end_1',
               },
               position_x: 100,
@@ -151,10 +156,10 @@ export default function TemplatesPage() {
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || 'Failed to create flow');
+        throw new Error(json.error || `Failed to create flow (${res.status})`);
       }
       const data = await res.json();
-      toast.success(`Flow created for "${buttonText}"! Opening Flow Editor...`);
+      toast.success(`Flow created for "${cleaned || rawText}"! Opening Flow Editor...`);
       router.push(`/flows/${data.flow.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not create flow');
@@ -570,7 +575,7 @@ export default function TemplatesPage() {
                               <span className="font-medium text-foreground truncate">
                                 {btn.text}
                               </span>
-                              {btn.type === 'QUICK_REPLY' && (
+                              {btn.text && (
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -928,7 +933,7 @@ export default function TemplatesPage() {
                           className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 px-2.5 py-1.5 text-xs"
                         >
                           <span className="font-medium text-slate-900 dark:text-slate-100">{btn.text}</span>
-                          {btn.type === 'QUICK_REPLY' && (
+                          {btn.text && (
                             <Button
                               size="sm"
                               onClick={() => {

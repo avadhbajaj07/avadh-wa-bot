@@ -49,27 +49,14 @@ export async function POST(request: Request) {
   // Creating a flow is a write — the RLS flows_insert policy requires
   // `agent`, but this route inserts via the service-role client which
   // bypasses RLS, so the role must be enforced here.
+  let ctx: Awaited<ReturnType<typeof requireRole>>
   try {
-    await requireRole('agent')
+    ctx = await requireRole('agent')
   } catch (err) {
     return toErrorResponse(err)
   }
 
-  const guard = await requireUser()
-  if (!guard.ok) {
-    return NextResponse.json(guard.body, { status: guard.status })
-  }
-  const { userId, supabase } = guard
-
-  // Resolve the caller's account_id — `flows.account_id` is NOT NULL
-  // post-017, so an INSERT without it trips the not-null constraint
-  // even though the admin client below bypasses RLS.
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', userId)
-    .single()
-  const accountId = profile?.account_id as string | undefined
+  const { userId, accountId } = ctx
   if (!accountId) {
     return NextResponse.json(
       { error: 'Your profile is not linked to an account.' },

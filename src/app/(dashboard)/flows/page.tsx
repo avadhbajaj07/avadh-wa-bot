@@ -133,11 +133,11 @@ export default function FlowsPage() {
                 if (
                   b &&
                   typeof b === "object" &&
-                  "type" in b &&
-                  b.type === "QUICK_REPLY" &&
-                  b.text
+                  "text" in b &&
+                  typeof b.text === "string" &&
+                  b.text.trim()
                 ) {
-                  items.push({ templateName: tmpl.name, buttonText: b.text });
+                  items.push({ templateName: tmpl.name, buttonText: b.text.trim() });
                 }
               }
             }
@@ -164,14 +164,18 @@ export default function FlowsPage() {
   ) {
     setCreating(true);
     try {
+      const rawText = (buttonText || '').trim();
+      const cleaned = rawText.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+      const keywords = Array.from(new Set([rawText, cleaned])).filter(Boolean);
+
       const res = await fetch("/api/flows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: `Flow: ${buttonText}`,
-          description: `Triggered when customer clicks "${buttonText}" in template "${templateName}"`,
+          name: `Flow: ${cleaned || rawText || templateName}`,
+          description: `Triggered when customer clicks "${rawText}" in template "${templateName}"`,
           trigger_type: "keyword",
-          trigger_config: { keywords: [buttonText], matching: "contains" },
+          trigger_config: { keywords, match_type: "contains" },
           entry_node_id: "start_1",
           nodes: [
             {
@@ -185,7 +189,7 @@ export default function FlowsPage() {
               node_key: "msg_1",
               node_type: "send_message",
               config: {
-                text: `Hello! You clicked "${buttonText}". Here are the details:`,
+                text: `Hello! You clicked "${rawText}". Here are the details:`,
                 next_node_key: "end_1",
               },
               position_x: 100,
@@ -204,7 +208,7 @@ export default function FlowsPage() {
       if (!res.ok) throw new Error(`Create failed: ${res.status}`);
       const json = (await res.json()) as { flow: FlowRow };
       setCreateOpen(false);
-      toast.success(`Flow created for "${buttonText}"! Opening editor...`);
+      toast.success(`Flow created for "${cleaned || rawText}"! Opening editor...`);
       router.push(`/flows/${json.flow.id}`);
     } catch (err) {
       console.error(err);

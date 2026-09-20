@@ -11,6 +11,7 @@ import { normalizeKey } from '@/lib/contacts/dedupe';
 import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 import { resolveImportTagIds } from '@/lib/contacts/resolve-import-tags';
 import { Contact, MessageTemplate } from '@/types';
+import { toast } from 'sonner';
 
 export type CustomFieldOperator = 'is' | 'is_not' | 'contains';
 
@@ -55,6 +56,8 @@ interface BroadcastPayload {
    * falls back to the template's stored URL only when this is empty.
    */
   headerMediaUrl?: string;
+  /** ISO datetime string when the broadcast is scheduled to be sent. */
+  scheduledAt?: string;
 }
 
 interface UseBroadcastSendingReturn {
@@ -463,7 +466,8 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             customField: payload.audience.customField,
             excludeTagIds: payload.audience.excludeTagIds,
           },
-          status: 'sending',
+          status: payload.scheduledAt ? 'scheduled' : 'sending',
+          scheduled_at: payload.scheduledAt ?? null,
           total_recipients: contacts.length,
           sent_count: 0,
           delivered_count: 0,
@@ -537,6 +541,15 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             `Failed to insert recipient batch ${i / INSERT_BATCH_SIZE + 1}: ${recipientError.message}`,
           );
         }
+      }
+
+      // If scheduled, all recipients are safely staged in DB; return now
+      if (payload.scheduledAt) {
+        setProgress(100);
+        toast.success(
+          `Broadcast "${payload.name}" scheduled for ${new Date(payload.scheduledAt).toLocaleString()}!`
+        );
+        return broadcast.id;
       }
 
       // ── Step 4: Fetch recipients back (joined contact) ────────────
