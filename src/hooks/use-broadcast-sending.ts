@@ -8,6 +8,7 @@ import {
   batchRetryDelayMs,
 } from '@/lib/broadcast-retry';
 import { normalizeKey } from '@/lib/contacts/dedupe';
+import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 import { resolveImportTagIds } from '@/lib/contacts/resolve-import-tags';
 import { Contact, MessageTemplate } from '@/types';
 
@@ -76,7 +77,7 @@ const SEND_BATCH_SIZE = 10;
 const SEND_BATCH_DELAY_MS = 1000;
 
 /** `broadcast_recipients` inserts are independent of the send rate. */
-const INSERT_BATCH_SIZE = 200;
+const INSERT_BATCH_SIZE = 50;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -141,15 +142,19 @@ async function fetchCustomValueIndex(
   const index: CustomValueIndex = new Map();
   if (contactIds.length === 0) return index;
 
-  // Supabase PostgREST caps the .in(...) IN-clause roughly at 1000
-  // values. Page through to stay safe.
-  const PAGE = 500;
+  // Keep chunk small (50 UUIDs is ~1.8KB) to stay well under Cloudflare's 16KB URL limit.
+  const PAGE = 50;
   for (let i = 0; i < contactIds.length; i += PAGE) {
     const slice = contactIds.slice(i, i + PAGE);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('contact_custom_values')
       .select('contact_id, custom_field_id, value')
       .in('contact_id', slice);
+
+    if (error) {
+      console.error('[fetchCustomValueIndex] error fetching custom values:', error);
+      continue;
+    }
 
     for (const row of data ?? []) {
       const bucket = index.get(row.contact_id) ?? new Map<string, string>();
@@ -191,12 +196,18 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         const uniqueContactIds = [
           ...new Set(contactTags.map((ct) => ct.contact_id)),
         ];
-        const { data, error } = await supabase
-          .from('contacts')
-          .select('*')
-          .in('id', uniqueContactIds);
-        if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
-        contacts = data ?? [];
+        const CHUNK_SIZE = 100;
+        const allContacts: Contact[] = [];
+        for (let i = 0; i < uniqueContactIds.length; i += CHUNK_SIZE) {
+          const slice = uniqueContactIds.slice(i, i + CHUNK_SIZE);
+          const { data, error } = await supabase
+            .from('contacts')
+            .select('*')
+            .in('id', slice);
+          if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
+          if (data) allContacts.push(...data);
+        }
+        contacts = allContacts;
       }
     } else if (audience.type === 'custom_field' && audience.customField) {
       contacts = await resolveCustomFieldAudience(supabase, audience.customField);
@@ -248,19 +259,26 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
     // De-duplicate within the input on the NORMALIZED number
     const uniqueByKey = new Map<string, { phone: string; name?: string; tags?: string[] }>();
     for (const row of csvRows) {
-      const key = normalizeKey(row.phone);
-      if (key && !uniqueByKey.has(key)) uniqueByKey.set(key, row);
+      const formatted = formatPhoneNumber(row.phone) || row.phone;
+      const key = normalizeKey(formatted);
+      if (key && !uniqueByKey.has(key)) uniqueByKey.set(key, { ...row, phone: formatted });
     }
     const keys = [...uniqueByKey.keys()];
 
-    // Single round-trip lookup of contacts already in this ACCOUNT
-    const { data: existing, error: lookupErr } = await supabase
-      .from('contacts')
-      .select('*')
-      .eq('account_id', accountId)
-      .in('phone_normalized', keys);
-    if (lookupErr) {
-      throw new Error(`Failed to look up contacts: ${lookupErr.message}`);
+    // Chunked lookup of contacts already in this ACCOUNT to avoid URL length limits
+    const existing: Contact[] = [];
+    const LOOKUP_CHUNK = 100;
+    for (let i = 0; i < keys.length; i += LOOKUP_CHUNK) {
+      const slice = keys.slice(i, i + LOOKUP_CHUNK);
+      const { data, error: lookupErr } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('account_id', accountId)
+        .in('phone_normalized', slice);
+      if (lookupErr) {
+        throw new Error(`Failed to look up contacts: ${lookupErr.message}`);
+      }
+      if (data) existing.push(...(data as Contact[]));
     }
 
     const byKey = new Map<string, Contact>();
@@ -383,12 +401,18 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
     const contactIds = [...new Set((matches ?? []).map((m) => m.contact_id))];
     if (contactIds.length === 0) return [];
 
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('*')
-      .in('id', contactIds);
-    if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
-    return data ?? [];
+    const CHUNK_SIZE = 100;
+    const allContacts: Contact[] = [];
+    for (let i = 0; i < contactIds.length; i += CHUNK_SIZE) {
+      const slice = contactIds.slice(i, i + CHUNK_SIZE);
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('*')
+        .in('id', slice);
+      if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
+      if (data) allContacts.push(...data);
+    }
+    return allContacts;
   }
 
   async function createAndSendBroadcast(payload: BroadcastPayload): Promise<string> {
@@ -465,10 +489,15 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       // column. Resolving once here also means the resume sends exactly
       // what this pass would have.
       setProgress(20);
-      const customValueIndex = await fetchCustomValueIndex(
-        supabase,
-        contacts.map((c) => c.id),
+      const hasCustomFieldVars = Object.values(payload.variables ?? {}).some(
+        (v) => v?.type === 'custom_field',
       );
+      const customValueIndex = hasCustomFieldVars
+        ? await fetchCustomValueIndex(
+            supabase,
+            contacts.map((c) => c.id),
+          )
+        : new Map();
       const paramsByContact = new Map(
         contacts.map((contact) => [
           contact.id,
@@ -515,7 +544,8 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       const { data: recipients, error: recipientsFetchError } = await supabase
         .from('broadcast_recipients')
         .select('*, contact:contacts(*)')
-        .eq('broadcast_id', broadcast.id);
+        .eq('broadcast_id', broadcast.id)
+        .limit(10000);
 
       if (recipientsFetchError || !recipients) {
         throw new Error('Failed to fetch broadcast recipients');
@@ -542,13 +572,17 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
 
         const apiRecipients = batch
           .filter((r) => r.contact?.phone)
-          .map((r) => ({
-            phone: r.contact!.phone as string,
-            // Read back off the row rather than re-resolved, so this
-            // pass and any later resume send identical params.
-            params: Array.isArray(r.template_params) ? r.template_params : [],
-            ...(messageParams ? { messageParams } : {}),
-          }));
+          .map((r) => {
+            const rawPhone = r.contact!.phone as string;
+            const phone = formatPhoneNumber(rawPhone) || rawPhone;
+            return {
+              phone,
+              // Read back off the row rather than re-resolved, so this
+              // pass and any later resume send identical params.
+              params: Array.isArray(r.template_params) ? r.template_params : [],
+              ...(messageParams ? { messageParams } : {}),
+            };
+          });
 
         if (apiRecipients.length === 0) continue;
 
@@ -568,7 +602,11 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
               }),
             });
 
-            data = await res.json();
+            try {
+              data = await res.json();
+            } catch {
+              data = { error: `Server error (${res.status})` };
+            }
             if (res.ok) break;
 
             const retryIn =

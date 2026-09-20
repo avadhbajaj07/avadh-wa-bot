@@ -1,5 +1,3 @@
-import { formatPhoneNumber } from './parse-pasted-numbers';
-
 /**
  * CSV parsing for the contacts import modal and broadcast wizard.
  * Shared + unit-tested so tag-column handling stays aligned with
