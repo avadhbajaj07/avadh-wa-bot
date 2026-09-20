@@ -36,6 +36,7 @@ import {
   RotateCcw,
   Calendar,
   FileText,
+  Copy,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -217,8 +218,32 @@ export default function BroadcastDetailPage() {
     [recipients, statusFilter],
   );
 
-  function handleExport() {
+  function handleExport(onlyFailed: boolean = false) {
     if (!broadcast) return;
+    const targetRecipients = onlyFailed
+      ? recipients.filter((r) => r.status === 'failed')
+      : recipients;
+
+    if (targetRecipients.length === 0) {
+      toast.error(onlyFailed ? 'No failed recipients to export' : 'No recipients to export');
+      return;
+    }
+
+    if (onlyFailed) {
+      // Standard Phone, Name header matching the wizard's CSV importer
+      const header = ['Phone', 'Name', 'Failure Reason'];
+      const rows = targetRecipients.map((r) => [
+        r.contact?.phone ?? '',
+        r.contact?.name ?? '',
+        r.error_message ?? '',
+      ]);
+      const csv = toCsv([header, ...rows]);
+      const safeName = broadcast.name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase();
+      downloadBlob(`failed-numbers-${safeName}-${broadcastId.slice(0, 8)}.csv`, csv);
+      toast.success(`Downloaded ${targetRecipients.length} failed contact numbers`);
+      return;
+    }
+
     const header = [
       t('table.contact'),
       t('table.phone'),
@@ -228,7 +253,7 @@ export default function BroadcastDetailPage() {
       t('table.read'),
       t('table.error'),
     ];
-    const rows = recipients.map((r) => [
+    const rows = targetRecipients.map((r) => [
       r.contact?.name ?? '',
       r.contact?.phone ?? '',
       r.status,
@@ -240,6 +265,24 @@ export default function BroadcastDetailPage() {
     const csv = toCsv([header, ...rows]);
     const safeName = broadcast.name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase();
     downloadBlob(`broadcast-${safeName}-${broadcastId.slice(0, 8)}.csv`, csv);
+  }
+
+  function handleCopyFailedNumbers() {
+    const failedList = recipients
+      .filter((r) => r.status === 'failed' && r.contact?.phone)
+      .map((r) => {
+        const phone = r.contact!.phone;
+        const name = r.contact?.name;
+        return name ? `${phone}, ${name}` : phone;
+      });
+
+    if (failedList.length === 0) {
+      toast.error('No failed phone numbers found');
+      return;
+    }
+
+    navigator.clipboard.writeText(failedList.join('\n'));
+    toast.success(`Copied ${failedList.length} failed numbers to clipboard!`);
   }
 
   /**
@@ -474,24 +517,46 @@ export default function BroadcastDetailPage() {
               </Button>
             )}
             {retryableCount > 0 && (
-              <Button
-                size="sm"
-                variant={pendingCount === 0 ? 'default' : 'outline'}
-                onClick={() => handleResume('failed')}
-                disabled={resumingScope !== null}
-                className={
-                  pendingCount === 0
-                    ? 'bg-rose-600 text-white hover:bg-rose-700 font-medium'
-                    : 'border-border text-muted-foreground hover:bg-muted'
-                }
-              >
-                {resumingScope === 'failed' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RotateCcw className="h-3.5 w-3.5" />
-                )}
-                {`Retry All Failed Messages (${retryableCount.toLocaleString()})`}
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant={pendingCount === 0 ? 'default' : 'outline'}
+                  onClick={() => handleResume('failed')}
+                  disabled={resumingScope !== null}
+                  className={
+                    pendingCount === 0
+                      ? 'bg-rose-600 text-white hover:bg-rose-700 font-medium'
+                      : 'border-border text-muted-foreground hover:bg-muted'
+                  }
+                >
+                  {resumingScope === 'failed' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  )}
+                  {`Retry All Failed Messages (${retryableCount.toLocaleString()})`}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExport(true)}
+                  className="border-border text-foreground hover:bg-muted"
+                  title="Download CSV of failed numbers to create a new campaign"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {`Download Failed (${retryableCount.toLocaleString()})`}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopyFailedNumbers}
+                  className="border-border text-foreground hover:bg-muted"
+                  title="Copy failed numbers to clipboard to paste into a new campaign"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy Failed Numbers
+                </Button>
+              </>
             )}
           </div>
         </div>
@@ -853,10 +918,23 @@ export default function BroadcastDetailPage() {
               </DropdownMenuContent>
             </DropdownMenu>
 
+            {retryableCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleExport(true)}
+                className="border-rose-500/30 text-rose-400 hover:bg-rose-500/10"
+                title="Download CSV containing only the failed numbers from this campaign"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {`Download Failed (${retryableCount.toLocaleString()})`}
+              </Button>
+            )}
+
             <Button
               variant="outline"
               size="sm"
-              onClick={handleExport}
+              onClick={() => handleExport(false)}
               disabled={recipients.length === 0}
               className="border-border text-muted-foreground hover:bg-muted"
             >
