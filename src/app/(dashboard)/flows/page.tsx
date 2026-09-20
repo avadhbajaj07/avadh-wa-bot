@@ -17,10 +17,12 @@ import {
   UserPlus,
   Video,
   FileText,
+  Sparkles,
 } from "lucide-react";
 
 import { useTranslations } from "next-intl";
 import { useCan } from "@/hooks/use-can";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
 import {
@@ -94,14 +96,19 @@ export default function FlowsPage() {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [templateButtons, setTemplateButtons] = useState<
+    { templateName: string; buttonText: string }[]
+  >([]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [flowsRes, tmplRes] = await Promise.all([
+        const supabase = createClient();
+        const [flowsRes, tmplRes, templatesDb] = await Promise.all([
           fetch("/api/flows"),
           fetch("/api/flows/templates"),
+          supabase.from("message_templates").select("name, buttons").order("name"),
         ]);
         if (!flowsRes.ok) {
           throw new Error(`Failed to load flows: ${flowsRes.status}`);
@@ -116,6 +123,27 @@ export default function FlowsPage() {
           };
           if (!cancelled) setTemplates(tmplJson.templates ?? []);
         }
+
+        // Collect quick reply buttons from WhatsApp templates
+        if (!cancelled && templatesDb.data) {
+          const items: { templateName: string; buttonText: string }[] = [];
+          for (const tmpl of templatesDb.data) {
+            if (Array.isArray(tmpl.buttons)) {
+              for (const b of tmpl.buttons) {
+                if (
+                  b &&
+                  typeof b === "object" &&
+                  "type" in b &&
+                  b.type === "QUICK_REPLY" &&
+                  b.text
+                ) {
+                  items.push({ templateName: tmpl.name, buttonText: b.text });
+                }
+              }
+            }
+          }
+          setTemplateButtons(items);
+        }
       } catch (err) {
         if (!cancelled) {
           console.error(err);
@@ -129,6 +157,62 @@ export default function FlowsPage() {
       cancelled = true;
     };
   }, []);
+
+  async function handleCreateFromTemplateButton(
+    templateName: string,
+    buttonText: string,
+  ) {
+    setCreating(true);
+    try {
+      const res = await fetch("/api/flows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: `Flow: ${buttonText}`,
+          description: `Triggered when customer clicks "${buttonText}" in template "${templateName}"`,
+          trigger_type: "keyword",
+          trigger_config: { keywords: [buttonText], matching: "contains" },
+          entry_node_id: "start_1",
+          nodes: [
+            {
+              node_key: "start_1",
+              node_type: "start",
+              config: { next_node_key: "msg_1" },
+              position_x: 100,
+              position_y: 100,
+            },
+            {
+              node_key: "msg_1",
+              node_type: "send_message",
+              config: {
+                text: `Hello! You clicked "${buttonText}". Here are the details:`,
+                next_node_key: "end_1",
+              },
+              position_x: 100,
+              position_y: 240,
+            },
+            {
+              node_key: "end_1",
+              node_type: "end",
+              config: {},
+              position_x: 100,
+              position_y: 400,
+            },
+          ],
+        }),
+      });
+      if (!res.ok) throw new Error(`Create failed: ${res.status}`);
+      const json = (await res.json()) as { flow: FlowRow };
+      setCreateOpen(false);
+      toast.success(`Flow created for "${buttonText}"! Opening editor...`);
+      router.push(`/flows/${json.flow.id}`);
+    } catch (err) {
+      console.error(err);
+      toast.error(err instanceof Error ? err.message : "Failed to create flow");
+    } finally {
+      setCreating(false);
+    }
+  }
 
   async function handleCreate() {
     if (!newName.trim()) return;
@@ -287,6 +371,45 @@ export default function FlowsPage() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {templateButtons.length > 0 && (
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="h-4 w-4 text-primary" />
+                <p className="text-xs uppercase tracking-wide text-foreground font-semibold">
+                  Trigger from WhatsApp Template Button
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Click any button to create a flow that automatically runs when a customer taps it in WhatsApp:
+              </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {templateButtons.map((tb, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() =>
+                      handleCreateFromTemplateButton(tb.templateName, tb.buttonText)
+                    }
+                    disabled={creating}
+                    className="flex items-center justify-between rounded-lg border border-border bg-background p-3 text-left transition-colors hover:border-primary/40 hover:bg-muted disabled:opacity-50"
+                  >
+                    <div className="min-w-0 flex-1 pr-2">
+                      <p className="text-xs font-semibold text-foreground truncate">
+                        {tb.buttonText}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground truncate">
+                        Template: {tb.templateName}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                      Create Flow →
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
           )}

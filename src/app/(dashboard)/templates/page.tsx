@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   Plus,
@@ -101,12 +102,64 @@ const TEMPLATE_PRESETS: BrowsePreset[] = [
 ];
 
 export default function TemplatesPage() {
+  const router = useRouter();
   const { account } = useAuth();
   const canManage = useCan('edit-settings');
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [activeTab, setActiveTab] = useState<StatusTab>('ALL');
+
+  async function handleCreateFlowFromButton(template: MessageTemplate, buttonText: string) {
+    try {
+      const res = await fetch('/api/flows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: `Flow: ${buttonText}`,
+          description: `Triggered when customer clicks "${buttonText}" in template "${template.name}"`,
+          trigger_type: 'keyword',
+          trigger_config: { keywords: [buttonText], matching: 'contains' },
+          entry_node_id: 'start_1',
+          nodes: [
+            {
+              node_key: 'start_1',
+              node_type: 'start',
+              config: { next_node_key: 'msg_1' },
+              position_x: 100,
+              position_y: 100,
+            },
+            {
+              node_key: 'msg_1',
+              node_type: 'send_message',
+              config: {
+                text: `Hello! You clicked "${buttonText}". Here are the details:`,
+                next_node_key: 'end_1',
+              },
+              position_x: 100,
+              position_y: 240,
+            },
+            {
+              node_key: 'end_1',
+              node_type: 'end',
+              config: {},
+              position_x: 100,
+              position_y: 400,
+            },
+          ],
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Failed to create flow');
+      }
+      const data = await res.json();
+      toast.success(`Flow created for "${buttonText}"! Opening Flow Editor...`);
+      router.push(`/flows/${data.flow.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not create flow');
+    }
+  }
 
   // Modals
   const [createOpen, setCreateOpen] = useState(false);
@@ -503,6 +556,39 @@ export default function TemplatesPage() {
                         {template.footer_text}
                       </p>
                     )}
+                    {template.buttons && template.buttons.length > 0 && (
+                      <div className="border-t border-border/40 pt-2 space-y-1.5">
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          Interactive Buttons:
+                        </p>
+                        <div className="flex flex-col gap-1.5">
+                          {template.buttons.map((btn, bIdx) => (
+                            <div
+                              key={bIdx}
+                              className="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-2.5 py-1 text-xs"
+                            >
+                              <span className="font-medium text-foreground truncate">
+                                {btn.text}
+                              </span>
+                              {btn.type === 'QUICK_REPLY' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCreateFlowFromButton(template, btn.text);
+                                  }}
+                                  className="h-6 text-[11px] px-2 bg-primary/10 border-primary/30 text-primary hover:bg-primary hover:text-primary-foreground font-medium"
+                                >
+                                  <Sparkles className="size-3 mr-1" />
+                                  Make Flow
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -829,6 +915,35 @@ export default function TemplatesPage() {
                   <p className="text-[10px] text-slate-500 italic pt-1 border-t border-slate-200 dark:border-slate-700">
                     {previewTemplate.footer_text}
                   </p>
+                )}
+                {previewTemplate.buttons && previewTemplate.buttons.length > 0 && (
+                  <div className="border-t border-slate-200 dark:border-slate-700 pt-2 space-y-1.5">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                      Buttons:
+                    </p>
+                    <div className="flex flex-col gap-1.5">
+                      {previewTemplate.buttons.map((btn, bIdx) => (
+                        <div
+                          key={bIdx}
+                          className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 px-2.5 py-1.5 text-xs"
+                        >
+                          <span className="font-medium text-slate-900 dark:text-slate-100">{btn.text}</span>
+                          {btn.type === 'QUICK_REPLY' && (
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                handleCreateFlowFromButton(previewTemplate, btn.text);
+                              }}
+                              className="h-6 text-[11px] px-2 bg-primary text-primary-foreground font-medium"
+                            >
+                              <Sparkles className="size-3 mr-1" />
+                              Make Flow
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             </div>

@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { MessageTemplate } from '@/types';
+import { MessageTemplate, Tag } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
@@ -14,14 +16,32 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Send, Loader2, Users, Save } from 'lucide-react';
+import {
+  ArrowLeft,
+  Send,
+  Loader2,
+  Users,
+  Save,
+  Sparkles,
+  Check,
+  Plus,
+  X,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 interface AudienceConfig {
-  type: string;
+  type: 'all' | 'tags' | 'custom_field' | 'csv' | 'paste';
   tagIds?: string[];
+  customField?: {
+    fieldId: string;
+    operator: 'is' | 'is_not' | 'contains';
+    value: string;
+  };
   csvContacts?: { phone: string; name?: string; tags?: string[] }[];
   applyTagIds?: string[];
+  excludeTagIds?: string[];
 }
 
 interface Step4Props {
@@ -29,6 +49,7 @@ interface Step4Props {
   onNameChange: (name: string) => void;
   template: MessageTemplate;
   audience: AudienceConfig;
+  onAudienceChange?: (audience: AudienceConfig) => void;
   onSend: () => void;
   onSaveDraft?: () => void;
   onBack: () => void;
@@ -41,6 +62,7 @@ export function Step4ScheduleSend({
   onNameChange,
   template,
   audience,
+  onAudienceChange,
   onSend,
   onSaveDraft,
   onBack,
@@ -52,29 +74,76 @@ export function Step4ScheduleSend({
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
 
+  // Tags for optional auto-apply & exclude
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [loadingTags, setLoadingTags] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [creatingTag, setCreatingTag] = useState(false);
+  const [showTagOptions, setShowTagOptions] = useState(
+    Boolean(
+      (audience.applyTagIds && audience.applyTagIds.length > 0) ||
+        (audience.excludeTagIds && audience.excludeTagIds.length > 0)
+    )
+  );
+
+  useEffect(() => {
+    async function fetchTags() {
+      setLoadingTags(true);
+      try {
+        const supabase = createClient();
+        const { data } = await supabase.from('tags').select('*').order('name');
+        setTags(data ?? []);
+      } finally {
+        setLoadingTags(false);
+      }
+    }
+    fetchTags();
+  }, []);
+
   useEffect(() => {
     async function calculateReach() {
       setLoadingReach(true);
       try {
         const supabase = createClient();
 
+        let baseCount = 0;
+        let baseContactIds: string[] = [];
+
         if (audience.type === 'all') {
-          const { count } = await supabase
-            .from('contacts')
-            .select('*', { count: 'exact', head: true });
-          setEstimatedReach(count ?? 0);
+          if (audience.excludeTagIds && audience.excludeTagIds.length > 0) {
+            const { data } = await supabase.from('contacts').select('id');
+            baseContactIds = (data ?? []).map((c) => c.id);
+          } else {
+            const { count } = await supabase
+              .from('contacts')
+              .select('*', { count: 'exact', head: true });
+            baseCount = count ?? 0;
+          }
         } else if (audience.type === 'tags' && audience.tagIds && audience.tagIds.length > 0) {
           const { data: contactTags } = await supabase
             .from('contact_tags')
             .select('contact_id')
             .in('tag_id', audience.tagIds);
 
-          const uniqueIds = new Set((contactTags ?? []).map((ct) => ct.contact_id));
-          setEstimatedReach(uniqueIds.size);
+          const uniqueIds = [...new Set((contactTags ?? []).map((ct) => ct.contact_id))];
+          baseContactIds = uniqueIds;
         } else if ((audience.type === 'csv' || audience.type === 'paste') && audience.csvContacts) {
-          setEstimatedReach(audience.csvContacts.length);
+          baseCount = audience.csvContacts.length;
+        }
+
+        if (baseContactIds.length > 0) {
+          let finalIds = baseContactIds;
+          if (audience.excludeTagIds && audience.excludeTagIds.length > 0) {
+            const { data: excludeRows } = await supabase
+              .from('contact_tags')
+              .select('contact_id')
+              .in('tag_id', audience.excludeTagIds);
+            const excludedSet = new Set((excludeRows ?? []).map((r) => r.contact_id));
+            finalIds = finalIds.filter((id) => !excludedSet.has(id));
+          }
+          setEstimatedReach(finalIds.length);
         } else {
-          setEstimatedReach(0);
+          setEstimatedReach(baseCount);
         }
       } finally {
         setLoadingReach(false);
@@ -83,6 +152,71 @@ export function Step4ScheduleSend({
 
     calculateReach();
   }, [audience]);
+
+  function toggleApplyTag(tagId: string) {
+    if (!onAudienceChange) return;
+    const current = audience.applyTagIds ?? [];
+    const next = current.includes(tagId)
+      ? current.filter((id) => id !== tagId)
+      : [...current, tagId];
+    onAudienceChange({ ...audience, applyTagIds: next });
+  }
+
+  function toggleExcludeTag(tagId: string) {
+    if (!onAudienceChange) return;
+    const current = audience.excludeTagIds ?? [];
+    const next = current.includes(tagId)
+      ? current.filter((id) => id !== tagId)
+      : [...current, tagId];
+    onAudienceChange({ ...audience, excludeTagIds: next });
+  }
+
+  async function handleCreateNewTag() {
+    const name = newTagName.trim();
+    if (!name || !onAudienceChange) return;
+
+    setCreatingTag(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) throw new Error('Not authenticated');
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('account_id')
+        .eq('id', session.user.id)
+        .single();
+
+      if (!profile?.account_id) throw new Error('No account found');
+
+      const { data: newTag, error } = await supabase
+        .from('tags')
+        .insert({
+          account_id: profile.account_id,
+          user_id: session.user.id,
+          name,
+          color: '#3b82f6',
+        })
+        .select('*')
+        .single();
+
+      if (error) throw error;
+
+      setTags((prev) => [...prev, newTag]);
+      onAudienceChange({
+        ...audience,
+        applyTagIds: [...(audience.applyTagIds ?? []), newTag.id],
+      });
+      setNewTagName('');
+      toast.success(`Tag "${name}" created and applied.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create tag');
+    } finally {
+      setCreatingTag(false);
+    }
+  }
 
   const audienceLabel =
     audience.type === 'all'
@@ -121,31 +255,194 @@ export function Step4ScheduleSend({
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
             <p className="text-xs text-muted-foreground">{t('scheduleSend.template')}</p>
-            <p className="text-foreground">{template.name}</p>
+            <p className="text-foreground font-medium">{template.name}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">{t('scheduleSend.audience')}</p>
-            <p className="text-foreground">{audienceLabel}</p>
+            <p className="text-foreground font-medium">{audienceLabel}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">{t('scheduleSend.estimatedReach')}</p>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 mt-0.5">
               {loadingReach ? (
                 <Loader2 className="h-3 w-3 animate-spin text-primary" />
               ) : (
                 <>
                   <Users className="h-3.5 w-3.5 text-primary" />
-                  <p className="font-medium text-foreground">{estimatedReach.toLocaleString()}</p>
+                  <p className="font-bold text-foreground text-base">{estimatedReach.toLocaleString()}</p>
                 </>
               )}
             </div>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">{t('scheduleSend.language')}</p>
-            <p className="text-foreground">{template.language ?? 'en_US'}</p>
+            <p className="text-foreground font-medium">{template.language ?? 'en_US'}</p>
           </div>
         </div>
+
+        {/* Tags summary indicator */}
+        {((audience.applyTagIds && audience.applyTagIds.length > 0) ||
+          (audience.excludeTagIds && audience.excludeTagIds.length > 0)) && (
+          <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3 text-xs">
+            {audience.applyTagIds && audience.applyTagIds.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Auto-assigning:</span>
+                <span className="rounded bg-emerald-500/15 text-emerald-300 font-medium px-2 py-0.5 text-[11px]">
+                  {audience.applyTagIds.length} tag(s)
+                </span>
+              </div>
+            )}
+            {audience.excludeTagIds && audience.excludeTagIds.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-muted-foreground">Excluding:</span>
+                <span className="rounded bg-red-500/15 text-red-300 font-medium px-2 py-0.5 text-[11px]">
+                  {audience.excludeTagIds.length} tag(s)
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Optional Tag Options & Exclusions */}
+      {onAudienceChange && (
+        <div className="rounded-xl border border-border bg-card/40 p-4 space-y-4">
+          <div
+            onClick={() => setShowTagOptions(!showTagOptions)}
+            className="flex items-center justify-between cursor-pointer select-none"
+          >
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-emerald-400" />
+              <p className="text-sm font-medium text-foreground">
+                Apply Tags & Exclusions
+              </p>
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                Optional
+              </Badge>
+            </div>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+              {showTagOptions ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+            </Button>
+          </div>
+
+          {showTagOptions && (
+            <div className="space-y-4 pt-2 border-t border-border">
+              {/* Auto-Accept & Apply Tags */}
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-foreground">
+                  Apply Tags to Audience (Auto-Accept Tags)
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  Selected tags will be automatically assigned to all contacts in this broadcast.
+                </p>
+
+                {loadingTags ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                ) : (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {tags.map((tag) => {
+                      const isApplied = audience.applyTagIds?.includes(tag.id);
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => toggleApplyTag(tag.id)}
+                          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-all ${
+                            isApplied
+                              ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30'
+                              : 'border-border bg-muted text-muted-foreground hover:border-border'
+                          }`}
+                        >
+                          <span
+                            className="mr-1.5 h-2 w-2 rounded-full"
+                            style={{ backgroundColor: tag.color }}
+                          />
+                          {tag.name}
+                          {isApplied && <Check className="ml-1 h-3 w-3 text-emerald-400" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 pt-1.5">
+                  <Input
+                    value={newTagName}
+                    onChange={(e) => setNewTagName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleCreateNewTag();
+                      }
+                    }}
+                    placeholder="Create & apply new tag..."
+                    className="h-7 max-w-xs text-xs bg-muted border-border"
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCreateNewTag}
+                    disabled={!newTagName.trim() || creatingTag}
+                    className="h-7 text-xs"
+                  >
+                    {creatingTag ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5 mr-1" />
+                    )}
+                    Add Tag
+                  </Button>
+                </div>
+              </div>
+
+              {/* Exclude Contacts with Tags */}
+              <div className="space-y-2 pt-2 border-t border-border">
+                <div className="flex items-center gap-2">
+                  <X className="h-3.5 w-3.5 text-red-400" />
+                  <p className="text-xs font-medium text-foreground">
+                    Exclude Contacts with Tags
+                  </p>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Contacts with any of these tags will not receive this broadcast.
+                </p>
+
+                {tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {tags.map((tag) => {
+                      const isExcluded = audience.excludeTagIds?.includes(tag.id);
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => toggleExcludeTag(tag.id)}
+                          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium transition-all ${
+                            isExcluded
+                              ? 'border-red-500/40 bg-red-500/15 text-red-300 ring-1 ring-red-500/30'
+                              : 'border-border bg-muted/60 text-muted-foreground hover:border-border'
+                          }`}
+                        >
+                          <span
+                            className="mr-1.5 h-2 w-2 rounded-full"
+                            style={{ backgroundColor: tag.color }}
+                          />
+                          {tag.name}
+                          {isExcluded && <X className="ml-1 h-3 w-3 text-red-400" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Processing overlay */}
       {isProcessing && (
@@ -191,51 +488,51 @@ export function Step4ScheduleSend({
           )}
 
           <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
-          <DialogTrigger
-            render={
-              <Button
-                disabled={!name.trim() || isProcessing}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              />
-            }
-          >
-            <Send className="h-4 w-4" />
-            {t('scheduleSend.sendNow')}
-          </DialogTrigger>
-          <DialogContent className="border-border bg-popover sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="text-popover-foreground">{t('scheduleSend.confirmTitle')}</DialogTitle>
-              <DialogDescription className="text-muted-foreground">
-                {t.rich('scheduleSend.confirmDesc', {
-                  count: estimatedReach,
-                  template: template.name,
-                  b: (chunks) => (
-                    <span className="font-medium text-popover-foreground">{chunks}</span>
-                  ),
-                })}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setShowConfirm(false)}
-                className="border-border text-muted-foreground"
-              >
-                {t('cancel')}
-              </Button>
-              <Button
-                onClick={() => {
-                  setShowConfirm(false);
-                  onSend();
-                }}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <Send className="h-4 w-4" />
-                {t('scheduleSend.sendNow')}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            <DialogTrigger
+              render={
+                <Button
+                  disabled={!name.trim() || isProcessing}
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                />
+              }
+            >
+              <Send className="h-4 w-4" />
+              {t('scheduleSend.sendNow')}
+            </DialogTrigger>
+            <DialogContent className="border-border bg-popover sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="text-popover-foreground">{t('scheduleSend.confirmTitle')}</DialogTitle>
+                <DialogDescription className="text-muted-foreground">
+                  {t.rich('scheduleSend.confirmDesc', {
+                    count: estimatedReach,
+                    template: template.name,
+                    b: (chunks) => (
+                      <span className="font-medium text-popover-foreground">{chunks}</span>
+                    ),
+                  })}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setShowConfirm(false)}
+                  className="border-border text-muted-foreground"
+                >
+                  {t('cancel')}
+                </Button>
+                <Button
+                  onClick={() => {
+                    setShowConfirm(false);
+                    onSend();
+                  }}
+                  className="bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  <Send className="h-4 w-4" />
+                  {t('scheduleSend.sendNow')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>

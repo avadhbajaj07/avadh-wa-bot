@@ -26,7 +26,10 @@ import {
   ChevronDown,
   ChevronUp,
   CornerDownRight,
+  Sparkles,
+  Check,
 } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -272,6 +275,42 @@ function TriggerPanel({
   triggerIssues: ValidationIssue[];
   t: ReturnType<typeof useTranslations>;
 }) {
+  const [templateButtons, setTemplateButtons] = useState<
+    { templateName: string; buttonText: string }[]
+  >([]);
+
+  useEffect(() => {
+    async function fetchButtons() {
+      try {
+        const supabase = createClient();
+        const { data } = await supabase
+          .from('message_templates')
+          .select('name, buttons')
+          .order('name');
+        const items: { templateName: string; buttonText: string }[] = [];
+        for (const tmpl of data ?? []) {
+          if (Array.isArray(tmpl.buttons)) {
+            for (const b of tmpl.buttons) {
+              if (
+                b &&
+                typeof b === 'object' &&
+                'type' in b &&
+                b.type === 'QUICK_REPLY' &&
+                b.text
+              ) {
+                items.push({ templateName: tmpl.name, buttonText: b.text });
+              }
+            }
+          }
+        }
+        setTemplateButtons(items);
+      } catch (err) {
+        console.error('Failed to fetch template buttons:', err);
+      }
+    }
+    fetchButtons();
+  }, []);
+
   return (
     <section className="border-border bg-card rounded-lg border p-4">
       <h2 className="text-foreground mb-3 text-sm font-semibold">{t('triggerTitle')}</h2>
@@ -308,24 +347,70 @@ function TriggerPanel({
           </Select>
         </div>
         {state.trigger_type === 'keyword' && (
-          <div>
-            <label className="text-muted-foreground mb-1 block text-xs">
-              {t('keywordsLabel')}
-            </label>
-            <KeywordsInput
-              keywords={
-                Array.isArray(state.trigger_config.keywords)
-                  ? (state.trigger_config.keywords as string[])
-                  : []
-              }
-              onChange={(keywords) =>
-                setState((s) => ({
-                  ...s,
-                  trigger_config: { ...s.trigger_config, keywords },
-                }))
-              }
-              t={t}
-            />
+          <div className="space-y-2">
+            <div>
+              <label className="text-muted-foreground mb-1 block text-xs">
+                {t('keywordsLabel')}
+              </label>
+              <KeywordsInput
+                keywords={
+                  Array.isArray(state.trigger_config.keywords)
+                    ? (state.trigger_config.keywords as string[])
+                    : []
+                }
+                onChange={(keywords) =>
+                  setState((s) => ({
+                    ...s,
+                    trigger_config: { ...s.trigger_config, keywords },
+                  }))
+                }
+                t={t}
+              />
+            </div>
+
+            {templateButtons.length > 0 && (
+              <div className="space-y-1 rounded-md border border-border/60 bg-muted/30 p-2 text-xs">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  💡 Template Buttons (click to trigger on button tap):
+                </p>
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {templateButtons.map((tb, idx) => {
+                    const currentKeywords = Array.isArray(state.trigger_config.keywords)
+                      ? (state.trigger_config.keywords as string[])
+                      : [];
+                    const isAdded = currentKeywords.includes(tb.buttonText);
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          if (!isAdded) {
+                            setState((s) => ({
+                              ...s,
+                              trigger_config: {
+                                ...s.trigger_config,
+                                keywords: [...currentKeywords, tb.buttonText],
+                              },
+                            }));
+                          }
+                        }}
+                        disabled={isAdded}
+                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium border transition-colors ${
+                          isAdded
+                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                            : 'border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                        }`}
+                      >
+                        <Sparkles className="h-3 w-3 text-primary" />
+                        {tb.buttonText}
+                        <span className="text-[10px] text-muted-foreground">({tb.templateName})</span>
+                        {isAdded && <Check className="h-3 w-3 text-emerald-400" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

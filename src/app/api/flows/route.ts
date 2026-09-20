@@ -83,6 +83,14 @@ export async function POST(request: Request) {
         description?: string | null
         trigger_type?: 'keyword' | 'first_inbound_message' | 'manual'
         trigger_config?: Record<string, unknown>
+        entry_node_id?: string
+        nodes?: Array<{
+          node_key: string
+          node_type: string
+          config?: Record<string, unknown>
+          position_x?: number
+          position_y?: number
+        }>
         /**
          * If set, clone the matching template's name + trigger +
          * entry_node_id + nodes[] into a fresh draft for this user.
@@ -150,7 +158,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ flow }, { status: 201 })
   }
 
-  // -------- Plain (empty) create path --------
+  // -------- Plain create path --------
   if (!body.name?.trim()) {
     return NextResponse.json({ error: 'name is required' }, { status: 400 })
   }
@@ -166,6 +174,7 @@ export async function POST(request: Request) {
       status: 'draft',
       trigger_type,
       trigger_config: body.trigger_config ?? {},
+      entry_node_id: body.entry_node_id ?? null,
     })
     .select()
     .single()
@@ -175,5 +184,22 @@ export async function POST(request: Request) {
       { status: 500 },
     )
   }
+
+  if (body.nodes && Array.isArray(body.nodes) && body.nodes.length > 0) {
+    const { error: nodesErr } = await admin.from('flow_nodes').insert(
+      body.nodes.map((n) => ({
+        flow_id: data.id,
+        node_key: n.node_key,
+        node_type: n.node_type,
+        config: n.config ?? {},
+        position_x: n.position_x ?? 100,
+        position_y: n.position_y ?? 100,
+      })),
+    )
+    if (nodesErr) {
+      console.error('[flows] failed to insert initial nodes:', nodesErr.message)
+    }
+  }
+
   return NextResponse.json({ flow: data }, { status: 201 })
 }
