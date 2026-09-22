@@ -19,6 +19,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { loadAccountMetaCredentials } from '@/lib/flows/meta-send'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
+import { dispatchShikhaSmartReply } from '@/lib/ai/shikha-responder'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
   handleTemplateWebhookChange,
@@ -1048,15 +1049,23 @@ async function processMessage(
   // the webhook dispatch below); `dispatchInboundToAiReply` owns its
   // eligibility gates + try/catch and never throws.
   if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
-    await dispatchInboundToAiReply({
+    const handledByShikha = await dispatchShikhaSmartReply({
       accountId,
       conversationId: conversation.id,
-      contactId: contactRecord.id,
+      contactRecord,
+      inboundText,
       configOwnerUserId,
-      // Lets the bot show "typing…" (and mark the message read) while
-      // the reply is generated.
-      inboundMessageId: message.id,
     })
+
+    if (!handledByShikha) {
+      await dispatchInboundToAiReply({
+        accountId,
+        conversationId: conversation.id,
+        contactId: contactRecord.id,
+        configOwnerUserId,
+        inboundMessageId: message.id,
+      })
+    }
   }
 
   // message.received webhook (public API). Awaited — not fire-and-forget
