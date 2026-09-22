@@ -67,3 +67,23 @@ export function parseBroadcastCsv(text: string): ParseBroadcastCsvResult {
     duplicates,
   };
 }
+
+/**
+ * Extract all unique placeholder names (numeric or named, e.g. "1", "business_name")
+ * in order of appearance in the text.
+ */
+export function extractTemplatePlaceholders(text: string): string[] {
+  if (!text) return [];
+  const matches = text.matchAll(/\{\{([a-zA-Z0-9_]+)\}\}/g);
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const m of matches) {
+    const name = m[1];
+    if (!seen.has(name)) {
+      seen.add(name);
+      list.push(name);
+    }
+  }
+  return list;
+}
+

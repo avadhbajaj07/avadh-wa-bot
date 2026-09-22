@@ -11,9 +11,27 @@ import { normalizeKey } from '@/lib/contacts/dedupe';
 import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 import { resolveImportTagIds } from '@/lib/contacts/resolve-import-tags';
 import { BroadcastCsvContact } from '@/lib/broadcast-csv';
-import { extractTemplatePlaceholders } from '@/lib/whatsapp/template-validators';
 import { Contact, MessageTemplate } from '@/types';
 import { toast } from 'sonner';
+
+/**
+ * Extract all unique placeholder names (numeric or named, e.g. "1", "business_name")
+ * in order of appearance in the text.
+ */
+export function extractTemplatePlaceholders(text: string): string[] {
+  if (!text) return [];
+  const matches = text.matchAll(/\{\{([a-zA-Z0-9_]+)\}\}/g);
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const m of matches) {
+    const name = m[1];
+    if (!seen.has(name)) {
+      seen.add(name);
+      list.push(name);
+    }
+  }
+  return list;
+}
 
 export type CustomFieldOperator = 'is' | 'is_not' | 'contains';
 
