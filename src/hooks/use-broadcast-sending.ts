@@ -13,6 +13,7 @@ import { resolveImportTagIds } from '@/lib/contacts/resolve-import-tags';
 import { BroadcastCsvContact } from '@/lib/broadcast-csv';
 import { Contact, MessageTemplate } from '@/types';
 import { toast } from 'sonner';
+import { recordOutboundBroadcastMessage } from '@/lib/whatsapp/broadcast-conversation-sync';
 
 /**
  * Extract all unique placeholder names (numeric or named, e.g. "1", "business_name")
@@ -647,6 +648,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             const phone = formatPhoneNumber(rawPhone) || rawPhone;
             return {
               phone,
+              contact_id: r.contact_id,
               // Read back off the row rather than re-resolved, so this
               // pass and any later resume send identical params.
               params: Array.isArray(r.template_params) ? r.template_params : [],
@@ -720,6 +722,27 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
                   error_message: null,
                 })
                 .eq('id', recipient.id);
+
+              // Client-side mirror: ensure conversation & message appear in Chats tab immediately
+              if (accountId && recipient.contact_id) {
+                try {
+                  await recordOutboundBroadcastMessage({
+                    db: supabase,
+                    accountId,
+                    contactId: recipient.contact_id,
+                    templateName: payload.template.name,
+                    templateRow: payload.template,
+                    params: Array.isArray(recipient.template_params) ? recipient.template_params : [],
+                    whatsappMessageId: result.whatsapp_message_id ?? null,
+                    status: 'sent',
+                  });
+                } catch (chatMirrorErr) {
+                  console.error(
+                    '[useBroadcastSending] failed to mirror message to Chats:',
+                    chatMirrorErr
+                  );
+                }
+              }
             } else {
               failedCount++;
               await supabase

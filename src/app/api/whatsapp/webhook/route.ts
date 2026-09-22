@@ -25,6 +25,8 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
+import { recordOutboundBroadcastMessage } from '@/lib/whatsapp/broadcast-conversation-sync'
+import { resolveTemplateRow } from '@/lib/whatsapp/template-body'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -516,7 +518,15 @@ async function handleStatusUpdate(status: {
 
   const { data: recipient, error: recFetchErr } = await supabaseAdmin()
     .from('broadcast_recipients')
-    .select('id, status')
+    .select(`
+      id,
+      status,
+      contact_id,
+      template_params,
+      sent_at,
+      created_at,
+      broadcast:broadcasts!inner(account_id, template_name, template_language)
+    `)
     .eq('whatsapp_message_id', status.id)
     .maybeSingle()
 
@@ -548,6 +558,47 @@ async function handleStatusUpdate(status: {
 
     if (recUpdateErr) {
       console.error('Error updating broadcast recipient status:', recUpdateErr)
+    }
+
+    // Mirror status into conversations & messages so it appears updated in the Chats tab
+    try {
+      const b = (
+        Array.isArray(recipient.broadcast)
+          ? recipient.broadcast[0]
+          : recipient.broadcast
+      ) as unknown as {
+        account_id: string
+        template_name: string
+        template_language: string
+      } | null
+
+      if (b?.account_id && recipient.contact_id) {
+        const { row: templateRow } = await resolveTemplateRow(
+          supabaseAdmin(),
+          b.account_id,
+          b.template_name,
+          b.template_language
+        )
+        const params = Array.isArray(recipient.template_params)
+          ? recipient.template_params.filter(
+              (p: unknown): p is string => typeof p === 'string'
+            )
+          : []
+
+        await recordOutboundBroadcastMessage({
+          db: supabaseAdmin(),
+          accountId: b.account_id,
+          contactId: recipient.contact_id,
+          templateName: b.template_name,
+          templateRow,
+          params,
+          whatsappMessageId: status.id,
+          status: status.status as 'sent' | 'delivered' | 'read' | 'failed',
+          sentAt: recipient.sent_at || recipient.created_at || tsIso,
+        })
+      }
+    } catch (chatSyncErr) {
+      console.error('Error syncing broadcast status to Chats:', chatSyncErr)
     }
   }
 

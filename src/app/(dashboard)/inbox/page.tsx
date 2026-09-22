@@ -109,6 +109,20 @@ function InboxPageInner() {
     return () => clearInterval(interval);
   }, []);
 
+  // Auto-sync sent/delivered broadcast messages to Chats tab on initial load
+  useEffect(() => {
+    fetch('/api/whatsapp/broadcast/sync-conversations', { method: 'POST' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.synced > 0) {
+          setResyncToken((n) => n + 1);
+        }
+      })
+      .catch(() => {
+        // Best effort background sync
+      });
+  }, []);
+
   /**
    * Whether the desktop contact sidebar (tags / deals / notes) is shown.
    * Defaults to `true` (the historical behaviour) and is restored from

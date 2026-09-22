@@ -31,6 +31,8 @@ import type { MessageTemplate } from '@/types';
 import { findOrCreateContact } from '@/lib/api/v1/contacts';
 import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 
+import { recordOutboundBroadcastMessage } from '@/lib/whatsapp/broadcast-conversation-sync';
+
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
 export class BroadcastError extends Error {
   readonly code: string;
@@ -57,14 +59,17 @@ export interface CreateBroadcastParams {
   recipients: BroadcastRecipientInput[];
 }
 
-interface PlannedRecipient {
+export interface PlannedRecipient {
   recipientRowId: string;
   phone: string;
   params: string[];
+  contactId?: string;
 }
 
 export interface BroadcastPlan {
   broadcastId: string;
+  accountId?: string;
+  auditUserId?: string;
   templateName: string;
   templateLanguage: string;
   phoneNumberId: string;
@@ -227,12 +232,19 @@ export async function createBroadcast(
   const planned: PlannedRecipient[] = createdRows.map(
     (row: { recipient_id: string; contact_id: string }) => {
       const r = byContact.get(row.contact_id)!;
-      return { recipientRowId: row.recipient_id, phone: r.phone, params: r.params };
+      return {
+        recipientRowId: row.recipient_id,
+        phone: r.phone,
+        params: r.params,
+        contactId: row.contact_id,
+      };
     }
   );
 
   return {
     broadcastId,
+    accountId,
+    auditUserId,
     templateName,
     templateLanguage: resolvedTemplate.language,
     phoneNumberId: config.phone_number_id,
@@ -318,6 +330,40 @@ export async function deliverBroadcast(
           error_message: null,
         })
         .eq('id', recipient.recipientRowId);
+
+      // Mirror sent message into conversations & messages so it appears in the Chats tab
+      try {
+        let contactId = recipient.contactId;
+        let accountId = plan.accountId;
+        if (!contactId || !accountId) {
+          const { data: recRow } = await db
+            .from('broadcast_recipients')
+            .select('contact_id, broadcasts!inner(account_id)')
+            .eq('id', recipient.recipientRowId)
+            .maybeSingle();
+          if (recRow) {
+            contactId = contactId || recRow.contact_id;
+            const b = recRow.broadcasts as unknown as { account_id: string } | null;
+            accountId = accountId || b?.account_id;
+          }
+        }
+
+        if (contactId && accountId) {
+          await recordOutboundBroadcastMessage({
+            db,
+            accountId,
+            contactId,
+            userId: plan.auditUserId,
+            templateName: plan.templateName,
+            templateRow: plan.templateRow,
+            params: recipient.params,
+            whatsappMessageId: sentMessageId,
+            status: 'sent',
+          });
+        }
+      } catch (mirrorErr) {
+        console.error('[broadcast-core] failed to mirror message to Chats:', mirrorErr);
+      }
     } else {
       await db
         .from('broadcast_recipients')

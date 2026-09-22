@@ -45,8 +45,12 @@ interface BroadcastResult {
  * — meaning every recipient got contact-0's personalization. The new
  * shape is what actually fixes that.
  */
+import { recordOutboundBroadcastMessage } from '@/lib/whatsapp/broadcast-conversation-sync'
+
 interface NewRecipient {
   phone: string
+  /** Contact ID if already known (links to chats/inbox) */
+  contact_id?: string
   /** Body variable values, one per {{N}}. Legacy field. */
   params?: string[]
   /**
@@ -217,6 +221,39 @@ export async function POST(request: Request) {
           whatsapp_message_id: sentMessageId,
         })
         sentCount++
+
+        // Mirror sent message into conversations & messages so it appears in the Chats tab
+        try {
+          let cId = recipient.contact_id
+          if (!cId) {
+            const { data: c } = await supabase
+              .from('contacts')
+              .select('id')
+              .eq('account_id', accountId)
+              .eq('phone', sanitized)
+              .maybeSingle()
+            if (c?.id) cId = c.id
+          }
+
+          if (cId) {
+            await recordOutboundBroadcastMessage({
+              db: supabase,
+              accountId,
+              contactId: cId,
+              userId,
+              templateName: template_name,
+              templateRow,
+              params: recipient.params ?? [],
+              whatsappMessageId: sentMessageId,
+              status: 'sent',
+            })
+          }
+        } catch (mirrorErr) {
+          console.error(
+            `Failed to mirror broadcast message to conversation for ${recipient.phone}:`,
+            mirrorErr
+          )
+        }
       } else {
         console.error(
           `Failed to send broadcast to ${recipient.phone}:`,
