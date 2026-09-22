@@ -70,6 +70,7 @@ function isValidHttpUrl(value: string): boolean {
 
 const contactFields = [
   { value: 'name', labelKey: 'name' },
+  { value: 'company', labelKey: 'company' },
   { value: 'phone', labelKey: 'phone' },
   { value: 'email', labelKey: 'email' },
 ];
@@ -186,32 +187,71 @@ export function Step3Personalize({
     return list;
   }, [template.body_text]);
 
-  // Auto-match template variables to CSV columns when a CSV is uploaded
+  // Auto-match template variables to CSV columns OR contact fields
   useEffect(() => {
-    if (!audience?.csvColumns || audience.csvColumns.length === 0) return;
+    const hasCsv = Boolean(audience?.csvColumns && audience.csvColumns.length > 0);
     const newVars = { ...variables };
     let changed = false;
 
     for (const placeholder of placeholders) {
       const key = placeholder.replace(/^\{\{|\}\}$/g, '');
-      if (!newVars[key] || !newVars[key].value) {
-        // Look for matching column in csvColumns
-        const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const match = audience.csvColumns.find((col) => {
-          const normCol = col.toLowerCase().replace(/[^a-z0-9]/g, '');
-          return (
-            normCol === normalizedKey ||
-            normCol.includes(normalizedKey) ||
-            normalizedKey.includes(normCol)
-          );
-        });
+      const lowerKey = key.toLowerCase();
 
-        if (match) {
-          newVars[key] = { type: 'csv_column', value: match };
-          changed = true;
-        } else if (audience.csvColumns.length > 0 && !newVars[key]) {
-          newVars[key] = { type: 'csv_column', value: '' };
-          changed = true;
+      if (!newVars[key] || !newVars[key].value) {
+        if (hasCsv && audience?.csvColumns) {
+          // Look for matching column in csvColumns
+          const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const match = audience.csvColumns.find((col) => {
+            const normCol = col.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return (
+              normCol === normalizedKey ||
+              normCol.includes(normalizedKey) ||
+              normalizedKey.includes(normCol)
+            );
+          });
+
+          if (match) {
+            newVars[key] = { type: 'csv_column', value: match };
+            changed = true;
+          } else if (!newVars[key]) {
+            newVars[key] = { type: 'csv_column', value: '' };
+            changed = true;
+          }
+        } else {
+          // Contact-based audience auto-matching
+          if (
+            [
+              'business_name',
+              'business',
+              'company',
+              'company_name',
+              'nom_entreprise',
+              'entreprise',
+            ].includes(lowerKey)
+          ) {
+            newVars[key] = { type: 'field', value: 'company' };
+            changed = true;
+          } else if (
+            [
+              'name',
+              'full_name',
+              'first_name',
+              'contact_name',
+              'client_name',
+              'customer_name',
+              'nom',
+              'prenom',
+            ].includes(lowerKey)
+          ) {
+            newVars[key] = { type: 'field', value: 'name' };
+            changed = true;
+          } else if (['phone', 'mobile', 'tel', 'telephone'].includes(lowerKey)) {
+            newVars[key] = { type: 'field', value: 'phone' };
+            changed = true;
+          } else if (['email', 'mail'].includes(lowerKey)) {
+            newVars[key] = { type: 'field', value: 'email' };
+            changed = true;
+          }
         }
       }
     }
@@ -300,10 +340,10 @@ export function Step3Personalize({
           replacement = mapping.value;
         } else if (mapping.type === 'field' && mapping.value) {
           const fieldMap: Record<string, string | undefined> = {
-            name: contact.name,
+            name: contact.name || contact.company,
             phone: contact.phone,
             email: contact.email,
-            company: contact.company,
+            company: contact.company || contact.name,
           };
           replacement = fieldMap[mapping.value] ?? placeholder;
         } else if (mapping.type === 'custom_field' && mapping.value) {

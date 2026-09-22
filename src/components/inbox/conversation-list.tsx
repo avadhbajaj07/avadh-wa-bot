@@ -524,6 +524,45 @@ interface ConversationItemProps {
   t: ReturnType<typeof useTranslations>;
 }
 
+function formatLastMessagePreview(
+  text?: string | null,
+  contact?: Conversation["contact"],
+  fallback?: string
+): string {
+  if (!text) return fallback ?? "";
+  if (!text.includes("{{")) return text;
+  return text.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (match, raw) => {
+    const lower = raw.toLowerCase();
+    if (
+      [
+        'business_name',
+        'business',
+        'company',
+        'company_name',
+        'nom_entreprise',
+        'entreprise',
+      ].includes(lower)
+    ) {
+      return contact?.company || contact?.name || match;
+    }
+    if (
+      [
+        'name',
+        'full_name',
+        'first_name',
+        'contact_name',
+        'client_name',
+        'customer_name',
+        'nom',
+        'prenom',
+      ].includes(lower)
+    ) {
+      return contact?.name || contact?.company || match;
+    }
+    return match;
+  });
+}
+
 function ConversationItem({
   conversation,
   isActive,
@@ -575,7 +614,7 @@ function ConversationItem({
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <p className="truncate text-xs text-muted-foreground">
-            {conversation.last_message_text || t("noMessagesYet")}
+            {formatLastMessagePreview(conversation.last_message_text, conversation.contact, t("noMessagesYet"))}
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
             {conversation.unread_count > 0 && (

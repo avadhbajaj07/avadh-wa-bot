@@ -143,15 +143,43 @@ export function resolveVariables(
 
   return keys.map((key) => {
     const v = variables[key];
-    if (!v) return '';
+    if (!v) {
+      const lowerKey = key.toLowerCase();
+      if (
+        [
+          'business_name',
+          'business',
+          'company',
+          'company_name',
+          'nom_entreprise',
+          'entreprise',
+        ].includes(lowerKey)
+      ) {
+        return contact.company || contact.name || '';
+      }
+      if (
+        [
+          'name',
+          'full_name',
+          'contact_name',
+          'client_name',
+          'customer_name',
+          'nom',
+          'prenom',
+        ].includes(lowerKey)
+      ) {
+        return contact.name || contact.company || '';
+      }
+      return '';
+    }
     if (v.type === 'static') return v.value;
 
     if (v.type === 'field') {
       const fieldMap: Record<string, string | undefined> = {
-        name: contact.name,
-        phone: contact.phone,
-        email: contact.email,
-        company: contact.company,
+        name: contact.name || contact.company || '',
+        phone: contact.phone || '',
+        email: contact.email || '',
+        company: contact.company || contact.name || '',
       };
       return fieldMap[v.value] ?? '';
     }

@@ -17,18 +17,104 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
+import { extractTemplatePlaceholders } from '@/lib/whatsapp/template-validators';
 import type { MessageTemplate } from '@/types';
 
+export interface RenderTemplateOptions {
+  namedParams?: Record<string, string>;
+  contact?: {
+    name?: string | null;
+    company?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  } | null;
+}
+
 /**
- * Substitute positional `{{1}}`, `{{2}}`… placeholders in a template
+ * Substitute positional `{{1}}`, `{{2}}`… or named `{{business_name}}` placeholders in a template
  * body. A placeholder with no corresponding param is left as-is rather
  * than blanked, so a caller that under-supplies params gets a visible
  * `{{2}}` instead of a silently truncated sentence.
  */
-export function renderTemplateBody(body: string, params: string[]): string {
-  return body.replace(/\{\{(\d+)\}\}/g, (_, raw) => {
-    const idx = Number(raw) - 1;
-    return params[idx] ?? `{{${raw}}}`;
+export function renderTemplateBody(
+  body: string,
+  params: string[] = [],
+  options?: RenderTemplateOptions
+): string {
+  if (!body) return '';
+
+  const placeholders = extractTemplatePlaceholders(body);
+
+  return body.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, (match, raw) => {
+    // 1. Check explicit namedParams dictionary
+    if (options?.namedParams && raw in options.namedParams) {
+      const val = options.namedParams[raw];
+      if (val !== undefined && val !== null && val !== '') return String(val);
+    }
+
+    // 2. Check positional digit placeholders (e.g. {{1}}, {{2}})
+    if (/^\d+$/.test(raw)) {
+      const idx = Number(raw) - 1;
+      if (params[idx] !== undefined && params[idx] !== null && params[idx] !== '') {
+        return String(params[idx]);
+      }
+    }
+
+    // 3. Check named placeholder by appearance index in params array
+    const idx = placeholders.indexOf(raw);
+    if (idx >= 0 && params[idx] !== undefined && params[idx] !== null && params[idx] !== '') {
+      return String(params[idx]);
+    }
+
+    // 4. Contact attribute fallback
+    if (options?.contact) {
+      const lower = raw.toLowerCase();
+      if (
+        [
+          'business_name',
+          'business',
+          'company',
+          'company_name',
+          'nom_entreprise',
+          'entreprise',
+        ].includes(lower)
+      ) {
+        const val = options.contact.company || options.contact.name;
+        if (val) return val;
+      }
+      if (
+        [
+          'name',
+          'full_name',
+          'first_name',
+          'contact_name',
+          'client_name',
+          'customer_name',
+          'nom',
+          'prenom',
+        ].includes(lower)
+      ) {
+        const val = options.contact.name || options.contact.company;
+        if (val) return val;
+      }
+      if (['phone', 'mobile', 'tel', 'telephone'].includes(lower)) {
+        if (options.contact.phone) return options.contact.phone;
+      }
+      if (['email', 'mail'].includes(lower)) {
+        if (options.contact.email) return options.contact.email;
+      }
+    }
+
+    // 5. Unresolved: return original match
+    if (/^\d+$/.test(raw)) {
+      const numIdx = Number(raw) - 1;
+      return params[numIdx] ?? match;
+    }
+    if (idx >= 0 && params[idx] !== undefined) {
+      return params[idx];
+    }
+
+    return match;
   });
 }
 
@@ -162,10 +248,27 @@ export async function resolveTemplateRow(
  */
 export function templateContentText(
   row: MessageTemplate | null,
-  params: string[],
-  callerText?: string | null
+  params: string[] = [],
+  callerText?: string | null,
+  contact?: {
+    name?: string | null;
+    company?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  } | null
 ): string | null {
-  if (callerText) return callerText;
-  if (!row?.body_text) return null;
-  return renderTemplateBody(row.body_text, params);
+  if (callerText && !callerText.includes('{{')) {
+    return callerText;
+  }
+  if (callerText && callerText.includes('{{')) {
+    const rendered = renderTemplateBody(callerText, params, { contact });
+    if (!rendered.includes('{{') || !row?.body_text) {
+      return rendered;
+    }
+  }
+  if (!row?.body_text) {
+    if (callerText) return renderTemplateBody(callerText, params, { contact });
+    return null;
+  }
+  return renderTemplateBody(row.body_text, params, { contact });
 }

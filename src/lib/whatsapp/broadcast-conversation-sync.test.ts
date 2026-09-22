@@ -176,6 +176,102 @@ describe('broadcast-conversation-sync', () => {
     expect(updatedMessages[0].status).toBe('delivered');
   });
 
+  it('heals an existing message if its content_text has unreplaced {{business_name}}', async () => {
+    const updatedMessages: Record<string, unknown>[] = [];
+    const conversationUpdates: Record<string, unknown>[] = [];
+
+    const mockDb = {
+      from: vi.fn((table: string) => {
+        if (table === 'conversations') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockReturnThis(),
+            limit: vi.fn().mockResolvedValue({
+              data: [{ id: 'conv-123' }],
+              error: null,
+            }),
+            update: vi.fn((data: Record<string, unknown>) => {
+              conversationUpdates.push(data);
+              return {
+                eq: vi.fn().mockResolvedValue({ error: null }),
+              };
+            }),
+          };
+        }
+
+        if (table === 'messages') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                id: 'msg-456',
+                status: 'sent',
+                conversation_id: 'conv-123',
+                content_text: 'Demande pour {{business_name}}.',
+              },
+              error: null,
+            }),
+            update: vi.fn((data: Record<string, unknown>) => {
+              updatedMessages.push(data);
+              return {
+                eq: vi.fn().mockResolvedValue({ error: null }),
+              };
+            }),
+          };
+        }
+
+        if (table === 'contacts') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: {
+                name: 'Campanini Coaching',
+                company: 'Campanini Coaching SARL',
+              },
+              error: null,
+            }),
+          };
+        }
+
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+      }),
+    } as unknown as SupabaseClient;
+
+    const result = await recordOutboundBroadcastMessage({
+      db: mockDb,
+      accountId: 'acct-1',
+      contactId: 'contact-1',
+      templateName: 'demo_request',
+      templateRow: {
+        id: 't-1',
+        account_id: 'acct-1',
+        name: 'demo_request',
+        language: 'fr',
+        category: 'MARKETING',
+        body_text: 'Demande pour {{business_name}}.',
+      } as any,
+      params: ['Campanini Coaching SARL'],
+      whatsappMessageId: 'wamid.HBg123',
+      status: 'sent',
+    });
+
+    expect(result?.conversationId).toBe('conv-123');
+    expect(updatedMessages.length).toBe(1);
+    expect(updatedMessages[0].content_text).toBe(
+      'Demande pour Campanini Coaching SARL.'
+    );
+    expect(conversationUpdates[0].last_message_text).toBe(
+      'Demande pour Campanini Coaching SARL.'
+    );
+  });
+
   it('syncs existing broadcast recipients into conversations', async () => {
     const mockDb = {
       from: vi.fn((table: string) => {

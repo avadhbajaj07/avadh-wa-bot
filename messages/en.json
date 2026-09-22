@@ -843,6 +843,7 @@
         "unmappedWarning": "Map every placeholder before continuing — still missing <mono>{keys}</mono>. Otherwise those placeholders will ship to Meta as empty strings.",
         "fieldMap": {
           "name": "Name",
+          "company": "Company / Business Name",
           "phone": "Phone",
           "email": "Email"
         }

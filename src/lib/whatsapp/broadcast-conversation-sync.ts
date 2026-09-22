@@ -75,7 +75,33 @@ export async function recordOutboundBroadcastMessage(
     }
   }
 
-  // 2. Resolve or create conversation
+  // 2. Fetch contact data for fallback (company, name, phone, email)
+  let contactData: { name: string | null; company: string | null; phone: string | null; email: string | null } | null = null;
+  try {
+    const { data: cRow } = await db
+      .from('contacts')
+      .select('name, company, phone, email')
+      .eq('id', contactId)
+      .maybeSingle();
+    if (cRow) {
+      contactData = cRow;
+    }
+  } catch (cErr) {
+    console.warn('[broadcast-conversation-sync] failed to fetch contact for fallback:', cErr);
+  }
+
+  // 3. Resolve template row if not provided
+  let activeTemplateRow = templateRow ?? null;
+  if (!activeTemplateRow && templateName) {
+    try {
+      const resolved = await resolveTemplateRow(db, accountId, templateName);
+      activeTemplateRow = resolved.row;
+    } catch {
+      // ignore
+    }
+  }
+
+  // 4. Resolve or create conversation
   let conversationId: string;
   try {
     conversationId = await findOrCreateConversationRow(
@@ -89,28 +115,45 @@ export async function recordOutboundBroadcastMessage(
     return null;
   }
 
-  // 3. Render template text
+  // 5. Render template text with params and contact fallback
   const renderedText =
-    contentText ||
-    templateContentText(templateRow ?? null, templateParams ?? []) ||
-    `[Template: ${templateName}]`;
+    templateContentText(
+      activeTemplateRow,
+      templateParams ?? [],
+      contentText,
+      contactData
+    ) || `[Template: ${templateName}]`;
 
   const msgTimestamp = sentAt || new Date().toISOString();
 
-  // 4. Check if a message with whatsappMessageId already exists
+  // 6. Check if a message with whatsappMessageId already exists
   if (whatsappMessageId) {
     const { data: existingMsg } = await db
       .from('messages')
-      .select('id, status, conversation_id')
+      .select('id, status, conversation_id, content_text')
       .eq('message_id', whatsappMessageId)
       .maybeSingle();
 
     if (existingMsg) {
-      // Update status if different
+      const updates: Record<string, unknown> = {};
       if (existingMsg.status !== status) {
+        updates.status = status;
+      }
+      // If existing message has unrendered placeholder or renderedText is cleaner, heal content_text
+      if (
+        renderedText &&
+        renderedText !== `[Template: ${templateName}]` &&
+        (existingMsg.content_text?.includes('{{') ||
+          !existingMsg.content_text ||
+          existingMsg.content_text !== renderedText)
+      ) {
+        updates.content_text = renderedText;
+      }
+
+      if (Object.keys(updates).length > 0) {
         await db
           .from('messages')
-          .update({ status })
+          .update(updates)
           .eq('id', existingMsg.id);
       }
 

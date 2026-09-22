@@ -64,6 +64,36 @@ describe('renderTemplateBody', () => {
       'twice and twice'
     );
   });
+
+  it('substitutes named placeholders like {{business_name}} using positional params array', () => {
+    expect(
+      renderTemplateBody('Demande de démonstration pour {{business_name}}.', [
+        'Campanini Coaching',
+      ])
+    ).toBe('Demande de démonstration pour Campanini Coaching.');
+  });
+
+  it('substitutes named placeholders using options.namedParams', () => {
+    expect(
+      renderTemplateBody('Bonjour {{name}} pour {{business_name}}', [], {
+        namedParams: { name: 'Marc', business_name: 'Studio Paris' },
+      })
+    ).toBe('Bonjour Marc pour Studio Paris');
+  });
+
+  it('falls back to contact.company or contact.name for business_name when params are empty', () => {
+    expect(
+      renderTemplateBody('Demande pour {{business_name}}', [], {
+        contact: { name: 'Campanini Coaching', company: null },
+      })
+    ).toBe('Demande pour Campanini Coaching');
+
+    expect(
+      renderTemplateBody('Demande pour {{business_name}}', [], {
+        contact: { name: 'Marc Dupont', company: 'Acme SARL' },
+      })
+    ).toBe('Demande pour Acme SARL');
+  });
 });
 
 describe('templateBodyParams', () => {
@@ -202,5 +232,26 @@ describe('templateContentText', () => {
 
   it('is null when there is no local row to render from', () => {
     expect(templateContentText(null, ['A123'])).toBeNull();
+  });
+
+  it('re-renders callerText when callerText contains unreplaced placeholders', () => {
+    expect(
+      templateContentText(
+        null,
+        ['Campanini Coaching'],
+        'Demande de démonstration pour {{business_name}}.'
+      )
+    ).toBe('Demande de démonstration pour Campanini Coaching.');
+  });
+
+  it('uses contact fallback to render template with named placeholder', () => {
+    expect(
+      templateContentText(
+        row({ body_text: 'Confirmation pour {{business_name}}.' }),
+        [],
+        null,
+        { name: 'Campanini Coaching', company: null }
+      )
+    ).toBe('Confirmation pour Campanini Coaching.');
   });
 });

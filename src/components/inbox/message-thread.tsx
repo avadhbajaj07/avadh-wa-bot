@@ -1158,6 +1158,7 @@ export function MessageThread({
                       >
                         <MessageBubble
                           message={msg}
+                          contact={contact}
                           reply={reply}
                           reactions={msgReactions}
                           currentUserId={user?.id}

@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { Message, MessageReaction } from "@/types";
+import type { Message, MessageReaction, Contact } from "@/types";
 import {
   Clock,
   Check,
@@ -27,6 +27,7 @@ import { useTranslations } from "next-intl";
 
 interface MessageBubbleProps {
   message: Message;
+  contact?: Contact | null;
   /** Pre-computed quote info for messages that reply to another. */
   reply?: { authorLabel: string; preview: string } | null;
   reactions?: MessageReaction[];
@@ -82,11 +83,13 @@ function StatusIcon({
 
 function MessageContent({
   message,
+  contact,
   t,
   isAgent,
   onOpenMedia,
 }: {
   message: Message;
+  contact?: Contact | null;
   t: ReturnType<typeof useTranslations>;
   /** Outbound bubbles sit on the primary fill — badges must invert. */
   isAgent: boolean;
@@ -153,14 +156,49 @@ function MessageContent({
       }
       return <MediaDocumentBubble message={message} t={t} />;
 
-    case "template":
-      // Templates are almost always outbound, where the bubble fill IS
-      // `primary` — so the old `bg-primary/20 text-primary` chip was
-      // primary-on-primary and invisible. Paired with a null
-      // content_text (issue #483) that rendered a bubble with nothing
-      // in it at all. Invert on the primary fill, and fall back to the
-      // template's name when we have no stored body (legacy rows sent
-      // before the fix).
+    case "template": {
+      let displayText = message.content_text;
+      if (displayText && displayText.includes("{{") && contact) {
+        displayText = displayText.replace(
+          /\{\{([a-zA-Z0-9_]+)\}\}/g,
+          (match, raw) => {
+            const lower = raw.toLowerCase();
+            if (
+              [
+                'business_name',
+                'business',
+                'company',
+                'company_name',
+                'nom_entreprise',
+                'entreprise',
+              ].includes(lower)
+            ) {
+              return contact.company || contact.name || match;
+            }
+            if (
+              [
+                'name',
+                'full_name',
+                'first_name',
+                'contact_name',
+                'client_name',
+                'customer_name',
+                'nom',
+                'prenom',
+              ].includes(lower)
+            ) {
+              return contact.name || contact.company || match;
+            }
+            if (['phone', 'mobile', 'tel', 'telephone'].includes(lower)) {
+              return contact.phone || match;
+            }
+            if (['email', 'mail'].includes(lower)) {
+              return contact.email || match;
+            }
+            return match;
+          }
+        );
+      }
       return (
         <div>
           <span
@@ -174,9 +212,9 @@ function MessageContent({
             <LayoutTemplate className="h-3 w-3" />
             {t("template")}
           </span>
-          {message.content_text ? (
+          {displayText ? (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
-              {message.content_text}
+              {displayText}
             </p>
           ) : (
             message.template_name && (
@@ -187,6 +225,7 @@ function MessageContent({
           )}
         </div>
       );
+    }
 
     case "location":
       return (
@@ -240,6 +279,7 @@ function MessageContent({
 
 export function MessageBubble({
   message,
+  contact,
   reply,
   reactions,
   currentUserId,
@@ -278,6 +318,7 @@ export function MessageBubble({
         )}
         <MessageContent
           message={message}
+          contact={contact}
           t={t}
           isAgent={isAgent}
           onOpenMedia={onOpenMedia}

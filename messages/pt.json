@@ -843,6 +843,7 @@
         "unmappedWarning": "Associe todas as variáveis antes de continuar — ainda faltam <mono>{keys}</mono>. Caso contrário, essas variáveis serão enviadas à Meta como strings vazias.",
         "fieldMap": {
           "name": "Nome",
+          "company": "Empresa / Nome comercial",
           "phone": "Telefone",
           "email": "E-mail"
         }
