@@ -145,12 +145,12 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
   }
 
   // 11. General Greetings: "Hi", "Hello", "Namaste"
-  const greetingPatterns = ['hi', 'hello', 'namaste', 'hey', 'hlo', 'hii', 'namaskar']
+  const greetingPatterns = ['hi', 'hello', 'namaste', 'hey', 'hlo', 'hii', 'namaskar', 'good morning', 'good afternoon', 'good evening']
   if (greetingPatterns.some((p) => text === p || text.startsWith(p + ' '))) {
     return {
       handled: true,
       replyText:
-        'Namaste! 🙏 Main Shikha Bajaj hoon, Certified Face Yoga & Natural Wellness Coach.\n\nKya aap 5-Day Face Yoga & Anti-Aging Workshop ke baare me jaanna chahti hain? Fees sirf ₹99 hai live sessions + recordings ke liye.\n\nDetails & Registration:\n👉 https://rzp.io/rzp/shikha07',
+        'Namaste! 🙏 Kaise hain aap? Main Shikha Bajaj, bataiye main aapki kya help kar sakti hoon? 😊',
     }
   }
 
