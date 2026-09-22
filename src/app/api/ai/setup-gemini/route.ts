@@ -78,7 +78,7 @@ Style Rules:
       .upsert(
         {
           account_id: accountId,
-          provider: 'gemini',
+          provider: 'openai',
           model: 'gemini-1.5-flash',
           api_key: encryptedKey,
           system_prompt: systemPrompt,

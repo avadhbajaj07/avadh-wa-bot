@@ -47,6 +47,9 @@ export async function GET() {
     // The keys are selected only to derive the has_* flags; neither is
     // returned to the client.
     const { api_key, embeddings_api_key, ...safe } = data
+    if (safe.model?.toLowerCase().startsWith('gemini')) {
+      safe.provider = 'gemini'
+    }
     return NextResponse.json({
       configured: true,
       has_key: !!api_key,
@@ -199,7 +202,7 @@ export async function POST(request: Request) {
 
     const encryptedKey = rawKey ? encrypt(rawKey) : null
     const shared: Record<string, unknown> = {
-      provider,
+      provider: provider === 'gemini' ? 'openai' : provider,
       model,
       system_prompt: systemPrompt,
       is_active: isActive,

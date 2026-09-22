@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { decrypt } from '@/lib/whatsapp/encryption'
-import type { AiConfig } from './types'
+import type { AiConfig, AiProvider } from './types'
 
 interface AiConfigRow {
   provider: 'openai' | 'anthropic'
@@ -69,8 +69,10 @@ export async function loadAiConfig(
     }
   }
 
+  const effectiveProvider = row.model?.toLowerCase().startsWith('gemini') ? 'gemini' : row.provider
+
   return {
-    provider: row.provider,
+    provider: effectiveProvider as AiProvider,
     model: row.model,
     apiKey: decrypt(row.api_key),
     systemPrompt: row.system_prompt,
