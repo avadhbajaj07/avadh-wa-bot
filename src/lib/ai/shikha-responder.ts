@@ -76,7 +76,7 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Fees sirf ₹99/- hai poore 5 din ke live sessions + daily recordings ke liye! 🌸\n\nIsme aapko live coaching ke sath daily practice guides bhi milte hain. Aap direct is link se register kar sakti hain:\n👉 https://rzp.io/rzp/shikha07',
+        'Fees sirf ₹99/- hai poore 5 din ke live sessions ke liye! 🌸\n\nYeh sessions fully live hote hain (hum recording provide nahi karte hain, par aap apne end pe session record kar sakti hain).\n\nAap direct is link se register kar sakti hain:\n👉 https://rzp.io/rzp/shikha07',
     }
   }
 
@@ -88,7 +88,7 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Session ke 2 batches available hain: Morning aur Evening! ⏰\n\nAap apni suvidha ke anusaar koi bhi batch attend kar sakti hain. Aur agar kisi din session miss ho jaye, toh daily recording bhi provide ki jaati hai!\n\nFees sirf ₹99 hai. Register karne ke liye:\n👉 https://rzp.io/rzp/shikha07',
+        'Session ke 2 batches available hain: Morning aur Evening! ⏰\n\nAap apni suvidha ke anusaar koi bhi batch attend kar sakti hain. Yeh session fully live hota hai (hum recording provide nahi karte, par aap apne end pe record kar sakti hain).\n\nFees sirf ₹99 hai. Register karne ke liye:\n👉 https://rzp.io/rzp/shikha07',
     }
   }
 
@@ -108,25 +108,26 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
   // 8. Regular / Monthly Morning Yoga Class (Only if asked)
   const regularYogaPatterns = [
     'regular class', 'monthly class', 'daily yoga', 'morning yoga', '8 am', 'roz ki class',
-    'regular yoga', 'monthly yoga', 'har roz'
+    'regular yoga', 'monthly yoga', 'har roz', 'offline'
   ]
   if (regularYogaPatterns.some((p) => text.includes(p))) {
     return {
       handled: true,
       replyText:
-        'Haan ji! Meri regular morning yoga class bhi chalti hai subah 8:00 AM se 9:00 AM tak. 🧘‍♀️\n\nIska charge sirf ₹1200 per month hai, aur aap pehle 4 days ka FREE demo le sakti hain!\n\nAgar aap demo attend karna chahti hain toh batayein, main aapko link send kar doongi. 😊',
+        'Haan ji! Meri regular morning yoga class OFFLINE chalti hai subah 8:00 AM se 9:00 AM tak. 🧘‍♀️\n\n📍 Location: i-play sports arena, Balaji Nagar (Khargone) mein turf par hoti hai.\n💰 Fees: Sirf ₹1200 per month, aur aap pehle 4 days ka FREE demo le sakti hain!\n\nAgar aap demo attend karna chahti hain toh bataiye, main aapko details send kar doongi. 😊',
     }
   }
 
-  // 9. Evening Yoga Class (Only if asked)
+  // 9. Evening Yoga / Extra Classes (Only if asked)
   const eveningYogaPatterns = [
-    'evening class', 'evening yoga', 'sham ki class', 'shaam ki class', 'evening batch yoga', 'sham ko yoga'
+    'evening class', 'evening yoga', 'sham ki class', 'shaam ki class', 'evening batch yoga', 'sham ko yoga',
+    'extra class', 'aur koi class', 'dusri class'
   ]
   if (eveningYogaPatterns.some((p) => text.includes(p))) {
     return {
       handled: true,
       replyText:
-        'Evening yoga class ke liye maine abhi thoda break liya hai, lekin evening class chalu hai — use Krishna ji le rahi hain! Main abhi sirf morning class (8 AM to 9 AM) le rahi hoon. 😊',
+        'Meri abhi koi evening ya extra classes nahi chal rahi hain. Abhi sirf Morning offline yoga class (Balaji Nagar turf par) aur yeh 5-day online Face Yoga workshop hi chal rahi hai. 😊',
     }
   }
 
@@ -134,13 +135,13 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
   const curriculumPatterns = [
     'kya sikhaye', 'kya sikhaya', 'kya hoga', 'workshop me kya', 'details kya hai',
     'kya details', 'session me kya', 'kya sikhne', 'content', 'syllabus', 'kya karwaoge',
-    'kya sikhate'
+    'kya sikhate', 'recording'
   ]
   if (curriculumPatterns.some((p) => text.includes(p))) {
     return {
       handled: true,
       replyText:
-        'Namaste! 🙏 Yeh jo program hai na, yeh 5 days ka hone wala hai jo kal se start ho raha hai.\n\nAur yeh paanch dino mein main:\n✨ Face oil ke sath practice karwaungi\n✨ Saath mein paani (water) & Spoons ke sath natural techniques\n✨ Anti-aging, dark circle, puffiness aur natural face cut\n\nAlmost 1 month ki exercises main aapko in 5 din mein hi seekha doongi, jisko fir aap ghar pe roz practice kar sakti hain! 🌸\n\nYeh 5 dino ka session only ₹99 mein hai. Register karne ke liye:\n👉 https://rzp.io/rzp/shikha07\n\n(Aur haan, agar aapko mera poster mila hai na, toh please isko zyada se zyada womens tak share karna aur ho sake toh status lagana! Thank you so much ❤️)',
+        'Namaste! 🙏 Yeh jo program hai na, yeh 5 days ka hone wala hai jo kal se start ho raha hai.\n\nAur yeh paanch dino mein main:\n✨ Face oil ke sath practice karwaungi\n✨ Saath mein paani (water) & Spoons ke sath natural techniques\n✨ Anti-aging, dark circle, puffiness aur natural face cut\n\nAlmost 1 month ki exercises main aapko in 5 din mein hi seekha doongi, jisko fir aap ghar pe roz practice kar sakti hain! 🌸\n\n(Yeh sessions fully live hain, hum recording provide nahi karte hain, par aap apne end pe session record kar sakti hain).\n\nYeh 5 dino ka session only ₹99 mein hai. Register karne ke liye:\n👉 https://rzp.io/rzp/shikha07\n\n(Aur haan, agar aapko mera poster mila hai na, toh please isko zyada se zyada womens tak share karna aur ho sake toh status lagana! Thank you so much ❤️)',
     }
   }
 
