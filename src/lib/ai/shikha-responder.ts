@@ -105,7 +105,46 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     }
   }
 
-  // 8. General Greetings: "Hi", "Hello", "Namaste"
+  // 8. Regular / Monthly Morning Yoga Class (Only if asked)
+  const regularYogaPatterns = [
+    'regular class', 'monthly class', 'daily yoga', 'morning yoga', '8 am', 'roz ki class',
+    'regular yoga', 'monthly yoga', 'har roz'
+  ]
+  if (regularYogaPatterns.some((p) => text.includes(p))) {
+    return {
+      handled: true,
+      replyText:
+        'Haan ji! Meri regular morning yoga class bhi chalti hai subah 8:00 AM se 9:00 AM tak. 🧘‍♀️\n\nIska charge sirf ₹1200 per month hai, aur aap pehle 4 days ka FREE demo le sakti hain!\n\nAgar aap demo attend karna chahti hain toh batayein, main aapko link send kar doongi. 😊',
+    }
+  }
+
+  // 9. Evening Yoga Class (Only if asked)
+  const eveningYogaPatterns = [
+    'evening class', 'evening yoga', 'sham ki class', 'shaam ki class', 'evening batch yoga', 'sham ko yoga'
+  ]
+  if (eveningYogaPatterns.some((p) => text.includes(p))) {
+    return {
+      handled: true,
+      replyText:
+        'Evening yoga class ke liye maine abhi thoda break liya hai, lekin evening class chalu hai — use Krishna ji le rahi hain! Main abhi sirf morning class (8 AM to 9 AM) le rahi hoon. 😊',
+    }
+  }
+
+  // 10. Detailed Session / What will be taught
+  const curriculumPatterns = [
+    'kya sikhaye', 'kya sikhaya', 'kya hoga', 'workshop me kya', 'details kya hai',
+    'kya details', 'session me kya', 'kya sikhne', 'content', 'syllabus', 'kya karwaoge',
+    'kya sikhate'
+  ]
+  if (curriculumPatterns.some((p) => text.includes(p))) {
+    return {
+      handled: true,
+      replyText:
+        'Namaste! 🙏 Yeh jo program hai na, yeh 5 days ka hone wala hai jo kal se start ho raha hai.\n\nAur yeh paanch dino mein main:\n✨ Face oil ke sath practice karwaungi\n✨ Saath mein paani (water) & Spoons ke sath natural techniques\n✨ Anti-aging, dark circle, puffiness aur natural face cut\n\nAlmost 1 month ki exercises main aapko in 5 din mein hi seekha doongi, jisko fir aap ghar pe roz practice kar sakti hain! 🌸\n\nYeh 5 dino ka session only ₹99 mein hai. Register karne ke liye:\n👉 https://rzp.io/rzp/shikha07\n\n(Aur haan, agar aapko mera poster mila hai na, toh please isko zyada se zyada womens tak share karna aur ho sake toh status lagana! Thank you so much ❤️)',
+    }
+  }
+
+  // 11. General Greetings: "Hi", "Hello", "Namaste"
   const greetingPatterns = ['hi', 'hello', 'namaste', 'hey', 'hlo', 'hii', 'namaskar']
   if (greetingPatterns.some((p) => text === p || text.startsWith(p + ' '))) {
     return {
