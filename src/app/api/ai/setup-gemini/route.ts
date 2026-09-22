@@ -79,7 +79,7 @@ Style Rules:
         {
           account_id: accountId,
           provider: 'openai',
-          model: 'gemini-1.5-flash',
+          model: 'gemini-2.5-flash',
           api_key: encryptedKey,
           system_prompt: systemPrompt,
           is_active: true,

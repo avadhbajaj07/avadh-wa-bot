@@ -28,7 +28,7 @@ interface GeminiResponse {
 export async function generateGemini(args: ProviderArgs): Promise<ProviderResult> {
   const { apiKey, model, systemPrompt, messages, timeoutMs } = args
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-1.5-flash'}:generateContent?key=${apiKey}`
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`
 
   const contents = mergeConsecutive(messages).map((m) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
