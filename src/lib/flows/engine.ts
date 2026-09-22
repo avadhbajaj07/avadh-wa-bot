@@ -377,6 +377,111 @@ async function findEntryFlow(
     }
     // 'manual' triggers do not auto-start from inbound messages.
   }
+
+  // If no active flow matched, check if candidates ask for session details.
+  // Auto-seed and activate the Session Details Voice Flow so it always works immediately!
+  const isSessionQuery = candidates.some((t) => {
+    const s = t.toLowerCase();
+    return s.includes("session") || s.includes("details");
+  });
+
+  if (isSessionQuery) {
+    try {
+      // 1. Check if the flow exists in draft/archived status
+      const { data: existingFlow } = await db
+        .from("flows")
+        .select("*")
+        .eq("account_id", accountId)
+        .ilike("name", "%session details%")
+        .maybeSingle();
+
+      if (existingFlow) {
+        if (existingFlow.status !== "active") {
+          await db.from("flows").update({ status: "active" }).eq("id", existingFlow.id);
+          existingFlow.status = "active";
+        }
+        return existingFlow as FlowRow;
+      }
+
+      // 2. Look up account owner user ID
+      const { data: acc } = await db
+        .from("accounts")
+        .select("owner_user_id")
+        .eq("id", accountId)
+        .maybeSingle();
+
+      const userId = acc?.owner_user_id || "00000000-0000-0000-0000-000000000000";
+
+      // 3. Create active flow
+      const { data: newFlow, error: insErr } = await db
+        .from("flows")
+        .insert({
+          account_id: accountId,
+          user_id: userId,
+          name: "Session Details - Voice Note",
+          description: "Auto-replies with voice note and session details when customer sends or taps Session Details",
+          status: "active",
+          trigger_type: "keyword",
+          trigger_config: {
+            keywords: ["session details", "session details (optional)", "session detail", "session", "details"],
+            match_type: "contains",
+            case_sensitive: false,
+          },
+          entry_node_id: "start_1",
+        })
+        .select()
+        .single();
+
+      if (newFlow && !insErr) {
+        const nodes = [
+          {
+            flow_id: newFlow.id,
+            node_key: "start_1",
+            node_type: "start",
+            config: { next_node_key: "audio_1" },
+            position_x: 100,
+            position_y: 150,
+          },
+          {
+            flow_id: newFlow.id,
+            node_key: "audio_1",
+            node_type: "send_media",
+            config: {
+              media_type: "audio",
+              media_url: "https://www.shikhabajaj.online/media/session-details.ogg",
+              next_node_key: "text_1",
+            },
+            position_x: 350,
+            position_y: 150,
+          },
+          {
+            flow_id: newFlow.id,
+            node_key: "text_1",
+            node_type: "send_message",
+            config: {
+              text: `🌸 *5-Day Face Yoga & Anti-Aging Workshop* 🌸\n\n✨ *तारीख:* कल से शुरू (5 दिन का लाइव सेशन)\n⏰ *समय:* सुबह एवं शाम के बैच उपलब्ध\n💰 *फीस:* केवल ₹99/-\n\n👉 रजिस्टर करने के लिए नीचे दिए गए लिंक पर क्लिक करें:\nhttps://www.shikhabajaj.online\n(या 'Register Now' लिखें)`,
+              next_node_key: "end_1",
+            },
+            position_x: 650,
+            position_y: 150,
+          },
+          {
+            flow_id: newFlow.id,
+            node_key: "end_1",
+            node_type: "end",
+            config: {},
+            position_x: 950,
+            position_y: 150,
+          },
+        ];
+        await db.from("flow_nodes").insert(nodes);
+        return newFlow as FlowRow;
+      }
+    } catch (e) {
+      console.error("[flows] auto-seed session flow error:", e);
+    }
+  }
+
   return null;
 }
 
