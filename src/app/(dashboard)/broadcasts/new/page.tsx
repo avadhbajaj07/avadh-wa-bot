@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -47,6 +47,24 @@ export default function NewBroadcastPage() {
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
   const [scheduledAt, setScheduledAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('broadcast_lead_contacts');
+      if (stored) {
+        const leadContacts = JSON.parse(stored);
+        if (Array.isArray(leadContacts) && leadContacts.length > 0) {
+          setAudience({
+            type: 'paste',
+            csvContacts: leadContacts,
+          });
+          setName(`Follow-up Campaign to Leads (${leadContacts.length})`);
+          toast.success(`Loaded ${leadContacts.length} campaign leads into audience!`);
+          sessionStorage.removeItem('broadcast_lead_contacts');
+        }
+      }
+    } catch {}
+  }, []);
 
   async function handleSend() {
     if (!template) return;

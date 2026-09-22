@@ -56,6 +56,8 @@ import {
   MessageSquare,
   Sparkles,
   CheckSquare,
+  Megaphone,
+  ClipboardPaste,
 } from 'lucide-react';
 import { ContactForm } from '@/components/contacts/contact-form';
 import { ContactDetailView } from '@/components/contacts/contact-detail-view';
@@ -85,12 +87,25 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
-  // Status filter: all | active (has conversation) | unused (never contacted)
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'unused'>('all');
+  // Status filter: all | active (has conversation) | leads (campaign clicks) | unused (never contacted)
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'leads' | 'unused'>('all');
   const [unusedStats, setUnusedStats] = useState<{ count: number; ids: string[] }>({
     count: 0,
     ids: [],
   });
+  const [leadsStats, setLeadsStats] = useState<{
+    count: number;
+    registerCount: number;
+    sessionCount: number;
+    leads: any[];
+  }>({
+    count: 0,
+    registerCount: 0,
+    sessionCount: 0,
+    leads: [],
+  });
+  const [leadTimeframe, setLeadTimeframe] = useState<'1' | '2' | '7' | 'all'>('2');
+  const [leadActionFilter, setLeadActionFilter] = useState<'all' | 'register' | 'session'>('all');
   const [cleanUpModalOpen, setCleanUpModalOpen] = useState(false);
   const [cleaningUp, setCleaningUp] = useState(false);
 
@@ -152,6 +167,23 @@ export default function ContactsPage() {
       console.error('Failed to fetch unused stats:', err);
     }
   }, []);
+
+  const fetchLeadsStats = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/contacts/leads?days=${leadTimeframe}&filter=${leadActionFilter}`);
+      if (res.ok) {
+        const data = await res.json();
+        setLeadsStats({
+          count: data.counts?.total || 0,
+          registerCount: data.counts?.register || 0,
+          sessionCount: data.counts?.session || 0,
+          leads: data.leads || [],
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch leads stats:', err);
+    }
+  }, [leadTimeframe, leadActionFilter]);
 
   const fetchContacts = useCallback(async () => {
     const seq = ++fetchSeq.current;
@@ -289,6 +321,34 @@ export default function ContactsPage() {
           contactRows = [];
         }
       }
+    } else if (statusFilter === 'leads') {
+      let leadList = leadsStats.leads;
+      if (leadList.length === 0 && leadsStats.count === 0) {
+        try {
+          const res = await fetch(`/api/contacts/leads?days=${leadTimeframe}&filter=${leadActionFilter}`);
+          if (res.ok) {
+            const data = await res.json();
+            leadList = data.leads || [];
+            setLeadsStats({
+              count: data.counts?.total || 0,
+              registerCount: data.counts?.register || 0,
+              sessionCount: data.counts?.session || 0,
+              leads: leadList,
+            });
+          }
+        } catch {}
+      }
+
+      if (term) {
+        leadList = leadList.filter(
+          (l: any) =>
+            l.phone.toLowerCase().includes(term.toLowerCase()) ||
+            (l.name && l.name.toLowerCase().includes(term.toLowerCase()))
+        );
+      }
+
+      count = leadList.length;
+      contactRows = leadList.slice(from, to + 1) as unknown as Contact[];
     } else {
       let query = supabase
         .from('contacts')
@@ -360,12 +420,13 @@ export default function ContactsPage() {
 
     setContacts(enriched);
     setLoading(false);
-  }, [supabase, page, search, selectedTagIds, statusFilter, unusedStats, tagsMap, t]);
+  }, [supabase, page, search, selectedTagIds, statusFilter, unusedStats, leadsStats, leadTimeframe, leadActionFilter, tagsMap, t]);
 
   useEffect(() => {
     fetchTags();
     fetchUnusedStats();
-  }, [fetchTags, fetchUnusedStats]);
+    fetchLeadsStats();
+  }, [fetchTags, fetchUnusedStats, fetchLeadsStats]);
 
   useEffect(() => {
     fetchContacts();
@@ -718,7 +779,7 @@ export default function ContactsPage() {
     }
   }
 
-  function handleStatusFilterChange(filter: 'all' | 'active' | 'unused') {
+  function handleStatusFilterChange(filter: 'all' | 'active' | 'leads' | 'unused') {
     setStatusFilter(filter);
     setPage(0);
   }
@@ -832,7 +893,7 @@ export default function ContactsPage() {
       {/* Status Filter Tabs */}
       <Tabs
         value={statusFilter}
-        onValueChange={(val) => handleStatusFilterChange(val as 'all' | 'active' | 'unused')}
+        onValueChange={(val) => handleStatusFilterChange(val as 'all' | 'active' | 'leads' | 'unused')}
         className="w-full"
       >
         <TabsList className="bg-muted/50 border border-border">
@@ -847,6 +908,14 @@ export default function ContactsPage() {
           <TabsTrigger value="active" className="text-xs">
             Active (Has Chat)
           </TabsTrigger>
+          <TabsTrigger value="leads" className="text-xs flex items-center gap-1.5 data-[state=active]:bg-emerald-500/15 data-[state=active]:text-emerald-700 dark:data-[state=active]:text-emerald-300">
+            <span>🔥 Leads (Register / Session)</span>
+            {leadsStats.count > 0 && (
+              <span className="rounded-full bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                {leadsStats.count}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="unused" className="text-xs flex items-center gap-1.5">
             <span>Unused</span>
             {unusedStats.count > 0 && (
@@ -857,6 +926,70 @@ export default function ContactsPage() {
           </TabsTrigger>
         </TabsList>
       </Tabs>
+
+      {/* Leads filter helper banner */}
+      {statusFilter === 'leads' && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-900 dark:text-emerald-200 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <div>
+              <p className="font-semibold text-sm">Campaign Leads ({leadsStats.count})</p>
+              <p className="text-emerald-700 dark:text-emerald-300">
+                Contacts who clicked &quot;Register Now&quot; ({leadsStats.registerCount}) or &quot;Session Details&quot; ({leadsStats.sessionCount}) in recent campaigns.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              onClick={() => {
+                if (leadsStats.leads.length === 0) {
+                  toast.info('No leads available');
+                  return;
+                }
+                const contactsPayload = leadsStats.leads.map((l: any) => ({
+                  phone: l.phone,
+                  name: l.name || undefined,
+                }));
+                try {
+                  sessionStorage.setItem('broadcast_lead_contacts', JSON.stringify(contactsPayload));
+                } catch {}
+                router.push('/broadcasts/new?source=leads');
+              }}
+              className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs shadow-sm"
+            >
+              <Megaphone className="size-3.5 mr-1.5" />
+              Send Follow-up Broadcast ({leadsStats.count})
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (leadsStats.leads.length === 0) {
+                  toast.info('No numbers to copy');
+                  return;
+                }
+                const numbers = leadsStats.leads.map((l: any) => l.phone).join('\n');
+                navigator.clipboard.writeText(numbers).then(() => {
+                  toast.success(`Copied ${leadsStats.leads.length} lead numbers to clipboard!`);
+                });
+              }}
+              className="h-8 border-emerald-500/40 text-emerald-900 dark:text-emerald-100 hover:bg-emerald-500/20 text-xs"
+            >
+              <ClipboardPaste className="size-3.5 mr-1" />
+              Copy Numbers
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => router.push('/leads')}
+              className="h-8 border-emerald-500/40 text-emerald-900 dark:text-emerald-100 hover:bg-emerald-500/20 text-xs"
+            >
+              View Full Leads Page →
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Unused filter helper banner */}
       {statusFilter === 'unused' && (

@@ -868,7 +868,7 @@ function useUserTags(): UserTag[] {
 // ============================================================
 
 interface SendMediaCfg {
-  media_type?: "image" | "video" | "document";
+  media_type?: "image" | "video" | "document" | "audio";
   media_url?: string;
   caption?: string;
   filename?: string;
@@ -884,6 +884,7 @@ const MEDIA_ACCEPT: Record<NonNullable<SendMediaCfg["media_type"]>, string> = {
   video: "video/mp4,video/3gpp",
   document:
     "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain",
+  audio: "audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/amr,audio/opus,.ogg,.mp3,.m4a,.aac",
 };
 
 const FLOW_MEDIA_BUCKET = "flow-media";
@@ -906,6 +907,7 @@ function SendMediaForm({
 
   const mediaType = cfg.media_type ?? "image";
   const isDocument = mediaType === "document";
+  const isAudio = mediaType === "audio";
   const displayName =
     cfg.filename ||
     (cfg.media_url ? cfg.media_url.split("/").pop() ?? "" : "");
@@ -970,6 +972,7 @@ function SendMediaForm({
             <SelectItem value="document">
               {t("documentLabel")}
             </SelectItem>
+            <SelectItem value="audio">Audio / Voice Note</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -1032,12 +1035,14 @@ function SendMediaForm({
         />
       </div>
 
-      <TextRow
-        label={t("captionLabel")}
-        value={cfg.caption ?? ""}
-        onChange={(v) => onUpdateConfig({ caption: v })}
-        rows={2}
-      />
+      {!isAudio && (
+        <TextRow
+          label={t("captionLabel")}
+          value={cfg.caption ?? ""}
+          onChange={(v) => onUpdateConfig({ caption: v })}
+          rows={2}
+        />
+      )}
 
       {isDocument && (
         <div>

@@ -57,7 +57,7 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Plus, Trash2, Play, Volume2, Maximize2, Image as ImageIcon, MessageSquare, Video as VideoIcon } from 'lucide-react';
+import { Plus, Trash2, Play, Volume2, Maximize2, Image as ImageIcon, MessageSquare, Video as VideoIcon, Mic } from 'lucide-react';
 
 import { useTranslations } from 'next-intl';
 
@@ -226,11 +226,26 @@ function FlowNodeCard({ data, selected }: NodeProps) {
 
       {/* Card Body based on node type */}
       <div className="p-3 space-y-2.5">
-        {/* 1. MEDIA NODE (Video or Image preview) */}
+        {/* 1. MEDIA NODE (Audio, Video or Image preview) */}
         {node.node_type === 'send_media' && (
           <>
-            {/* Video or Image player/thumbnail */}
-            {cfg.media_type === 'video' ? (
+            {/* Audio, Video or Image player/thumbnail */}
+            {cfg.media_type === 'audio' ? (
+              <div className="relative w-full rounded-xl p-3 bg-emerald-950/20 border border-emerald-500/30 flex items-center gap-3">
+                <div className="size-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                  <Mic className="size-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground truncate">
+                    <span>Voice Note (Audio)</span>
+                  </div>
+                  <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground font-mono">
+                    <Volume2 className="size-3 text-emerald-500 shrink-0" />
+                    <span className="truncate">{typeof cfg.media_url === 'string' ? cfg.media_url.split('/').pop() : 'session-details.ogg'}</span>
+                  </div>
+                </div>
+              </div>
+            ) : cfg.media_type === 'video' ? (
               <div className="relative w-full h-40 rounded-xl overflow-hidden bg-slate-900 flex flex-col justify-between p-2.5 border border-border/50 text-white shadow-inner">
                 {typeof cfg.media_url === 'string' && cfg.media_url.endsWith('.mp4') ? (
                   <video src={cfg.media_url} className="absolute inset-0 size-full object-cover" />

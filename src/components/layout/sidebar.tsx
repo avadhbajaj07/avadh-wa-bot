@@ -24,6 +24,7 @@ import {
   Settings,
   Shield,
   Sparkles,
+  Target,
   User,
   UserCog,
   Users,
@@ -102,6 +103,7 @@ const navItems: NavItem[] = [
   { href: "/templates", labelKey: "templates", icon: FileText },
   { href: "/flows", labelKey: "flows", icon: Workflow },
   { href: "/contacts", labelKey: "contacts", icon: Users },
+  { href: "/leads", labelKey: "leads", icon: Target },
   { href: "/automations", labelKey: "automation", icon: Zap },
   { href: "/agents", labelKey: "aiEmployee", icon: Sparkles },
 ];

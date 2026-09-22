@@ -105,6 +105,9 @@ export default function FlowsPage() {
     (async () => {
       try {
         const supabase = createClient();
+        // Auto-ensure Session Details voice note flow exists
+        await fetch("/api/flows/setup-session-flow").catch(() => {});
+
         const [flowsRes, tmplRes, templatesDb] = await Promise.all([
           fetch("/api/flows"),
           fetch("/api/flows/templates"),
