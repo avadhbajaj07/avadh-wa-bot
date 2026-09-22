@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useRef } from 'react';
-import { parseBroadcastCsv } from '@/lib/broadcast-csv';
+import { parseBroadcastCsv, BroadcastCsvContact } from '@/lib/broadcast-csv';
 import { parsePastedNumbers } from '@/lib/contacts/parse-pasted-numbers';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,7 +20,7 @@ import { useTranslations } from 'next-intl';
 
 type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv' | 'paste';
 
-interface AudienceConfig {
+export interface AudienceConfig {
   type: AudienceType;
   tagIds?: string[];
   customField?: {
@@ -28,7 +28,8 @@ interface AudienceConfig {
     operator: 'is' | 'is_not' | 'contains';
     value: string;
   };
-  csvContacts?: { phone: string; name?: string; tags?: string[] }[];
+  csvContacts?: BroadcastCsvContact[];
+  csvColumns?: string[];
   applyTagIds?: string[];
   excludeTagIds?: string[];
 }
@@ -123,6 +124,7 @@ export function Step2SelectAudience({
         ...audience,
         type: 'csv',
         csvContacts: result.contacts,
+        csvColumns: result.headers,
       });
 
       if (result.duplicates > 0) {
@@ -149,6 +151,7 @@ export function Step2SelectAudience({
     onUpdate({
       ...audience,
       csvContacts: undefined,
+      csvColumns: undefined,
     });
     if (csvInputRef.current) csvInputRef.current.value = '';
   }

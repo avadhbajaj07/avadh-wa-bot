@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Contact, CustomField, MessageTemplate } from '@/types';
+import { AudienceConfig } from '@/components/broadcasts/step2-select-audience';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -32,15 +33,16 @@ import {
 } from '@/lib/storage/upload-media';
 import { useTranslations } from 'next-intl';
 
-type VariableType = 'static' | 'field' | 'custom_field';
+export type VariableType = 'static' | 'field' | 'custom_field' | 'csv_column';
 
-interface VariableMapping {
+export interface VariableMapping {
   type: VariableType;
   value: string;
 }
 
 interface Step3Props {
   template: MessageTemplate;
+  audience?: AudienceConfig;
   variables: Record<string, VariableMapping>;
   onUpdate: (variables: Record<string, VariableMapping>) => void;
   /** Media URL for an IMAGE/VIDEO/DOCUMENT header, when the template has one. */
@@ -86,6 +88,7 @@ const SAMPLE_CONTACT: Contact = {
 
 export function Step3Personalize({
   template,
+  audience,
   variables,
   onUpdate,
   headerMediaUrl,
@@ -171,10 +174,52 @@ export function Step3Personalize({
   }, []);
 
   const placeholders = useMemo(() => {
-    const matches = template.body_text.match(/\{\{(\d+)\}\}/g);
-    if (!matches) return [];
-    return [...new Set(matches)].sort();
+    const matches = template.body_text.matchAll(/\{\{([a-zA-Z0-9_]+)\}\}/g);
+    const list: string[] = [];
+    const seen = new Set<string>();
+    for (const m of matches) {
+      if (!seen.has(m[0])) {
+        seen.add(m[0]);
+        list.push(m[0]);
+      }
+    }
+    return list;
   }, [template.body_text]);
+
+  // Auto-match template variables to CSV columns when a CSV is uploaded
+  useEffect(() => {
+    if (!audience?.csvColumns || audience.csvColumns.length === 0) return;
+    const newVars = { ...variables };
+    let changed = false;
+
+    for (const placeholder of placeholders) {
+      const key = placeholder.replace(/^\{\{|\}\}$/g, '');
+      if (!newVars[key] || !newVars[key].value) {
+        // Look for matching column in csvColumns
+        const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const match = audience.csvColumns.find((col) => {
+          const normCol = col.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return (
+            normCol === normalizedKey ||
+            normCol.includes(normalizedKey) ||
+            normalizedKey.includes(normCol)
+          );
+        });
+
+        if (match) {
+          newVars[key] = { type: 'csv_column', value: match };
+          changed = true;
+        } else if (audience.csvColumns.length > 0 && !newVars[key]) {
+          newVars[key] = { type: 'csv_column', value: '' };
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      onUpdate(newVars);
+    }
+  }, [placeholders, audience?.csvColumns]);
 
   // Templates with an IMAGE/VIDEO/DOCUMENT header need a media URL at
   // send time — Meta requires the media component on every delivery and
@@ -205,7 +250,7 @@ export function Step3Personalize({
 
   /**
    * A placeholder is "unmapped" if the user hasn't picked either a
-   * static value or a field/custom-field source. Blocks Next until
+   * static value or a field/custom-field/csv source. Blocks Next until
    * every placeholder has something — otherwise the broadcast would
    * ship with empty strings and confuse recipients.
    */
@@ -222,7 +267,11 @@ export function Step3Personalize({
   }, [placeholders, variables]);
 
   function updateVariable(key: string, patch: Partial<VariableMapping>) {
-    const current = variables[key] ?? { type: 'static' as VariableType, value: '' };
+    const defaultType: VariableType =
+      audience?.csvColumns && audience.csvColumns.length > 0
+        ? 'csv_column'
+        : 'static';
+    const current = variables[key] ?? { type: defaultType, value: '' };
     onUpdate({
       ...variables,
       [key]: { ...current, ...patch },
@@ -230,14 +279,15 @@ export function Step3Personalize({
   }
 
   /**
-   * Substitute placeholders using the first real contact where
-   * possible. Placeholders keyed by "{{N}}" map to variable key "N".
+   * Substitute placeholders using the first real contact or CSV row where
+   * possible.
    */
   const previewText = useMemo(() => {
     const contact = firstContact ?? SAMPLE_CONTACT;
     const customValues = firstContact
       ? firstContactCustomValues
       : new Map<string, string>();
+    const firstCsvRow = audience?.csvContacts?.[0]?.columns;
 
     let text = template.body_text;
     for (const placeholder of placeholders) {
@@ -258,6 +308,8 @@ export function Step3Personalize({
           replacement = fieldMap[mapping.value] ?? placeholder;
         } else if (mapping.type === 'custom_field' && mapping.value) {
           replacement = customValues.get(mapping.value) || placeholder;
+        } else if (mapping.type === 'csv_column' && mapping.value) {
+          replacement = firstCsvRow?.[mapping.value] || placeholder;
         }
       }
       text = text.replaceAll(placeholder, replacement);
@@ -269,11 +321,15 @@ export function Step3Personalize({
     placeholders,
     firstContact,
     firstContactCustomValues,
+    audience?.csvContacts,
   ]);
 
-  const previewLabel = firstContact
-    ? firstContact.name || firstContact.phone
-    : t('personalize.previewSample');
+  const hasCsvData = Boolean(audience?.csvContacts && audience.csvContacts.length > 0);
+  const previewLabel = hasCsvData
+    ? `CSV Preview (${audience!.csvContacts![0].name || audience!.csvContacts![0].phone})`
+    : firstContact
+      ? firstContact.name || firstContact.phone
+      : t('personalize.previewSample');
 
   return (
     <div className="space-y-6">
@@ -481,6 +537,9 @@ export function Step3Personalize({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="border-border bg-popover">
+                        {audience?.csvColumns && audience.csvColumns.length > 0 && (
+                          <SelectItem value="csv_column">{t('personalize.typeCsv')}</SelectItem>
+                        )}
                         <SelectItem value="static">{t('personalize.typeStatic')}</SelectItem>
                         <SelectItem value="field">{t('personalize.typeContact')}</SelectItem>
                         <SelectItem value="custom_field">
@@ -492,7 +551,11 @@ export function Step3Personalize({
 
                   <div>
                     <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                      {mapping.type === 'static' ? t('personalize.staticValue') : t('personalize.contactField')}
+                      {mapping.type === 'static'
+                        ? t('personalize.staticValue')
+                        : mapping.type === 'csv_column'
+                          ? t('personalize.csvColumn')
+                          : t('personalize.contactField')}
                     </label>
                     {mapping.type === 'static' ? (
                       <Input
@@ -503,6 +566,24 @@ export function Step3Personalize({
                         placeholder={t('personalize.enterValue')}
                         className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
                       />
+                    ) : mapping.type === 'csv_column' ? (
+                      <Select
+                        value={mapping.value || undefined}
+                        onValueChange={(val) =>
+                          updateVariable(key, { value: val || '' })
+                        }
+                      >
+                        <SelectTrigger className="w-full border-border bg-muted text-foreground">
+                          <SelectValue placeholder={t('personalize.selectCsvColumn')} />
+                        </SelectTrigger>
+                        <SelectContent className="border-border bg-popover">
+                          {audience?.csvColumns?.map((col) => (
+                            <SelectItem key={col} value={col}>
+                              {col}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     ) : mapping.type === 'field' ? (
                       <Select
                         value={mapping.value || undefined}

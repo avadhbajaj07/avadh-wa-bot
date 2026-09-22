@@ -12,9 +12,18 @@ describe('parseBroadcastCsv', () => {
     expect(result).toEqual({
       ok: true,
       duplicates: 0,
+      headers: ['phone', 'name'],
       contacts: [
-        { phone: '+15551230000', name: 'Ada' },
-        { phone: '+15559990000', name: 'Grace' },
+        {
+          phone: '+15551230000',
+          name: 'Ada',
+          columns: { phone: '+15551230000', name: 'Ada' },
+        },
+        {
+          phone: '+15559990000',
+          name: 'Grace',
+          columns: { phone: '+15559990000', name: 'Grace' },
+        },
       ],
     });
   });
@@ -24,11 +33,17 @@ describe('parseBroadcastCsv', () => {
     expect(result).toEqual({
       ok: true,
       duplicates: 0,
-      contacts: [{ phone: '+15551230000' }],
+      headers: ['phone'],
+      contacts: [
+        {
+          phone: '+15551230000',
+          columns: { phone: '+15551230000' },
+        },
+      ],
     });
   });
 
-  it('captures tags while dropping unused columns like email and company', () => {
+  it('captures tags and preserves raw columns including email and company', () => {
     const result = parseBroadcastCsv(
       `phone,name,email,company,tags
 +15551230000,Ada,ada@example.com,Analytical Engines,"VIP, Lead"`
@@ -36,7 +51,21 @@ describe('parseBroadcastCsv', () => {
     expect(result).toEqual({
       ok: true,
       duplicates: 0,
-      contacts: [{ phone: '+15551230000', name: 'Ada', tags: ['VIP', 'Lead'] }],
+      headers: ['phone', 'name', 'email', 'company', 'tags'],
+      contacts: [
+        {
+          phone: '+15551230000',
+          name: 'Ada',
+          tags: ['VIP', 'Lead'],
+          columns: {
+            phone: '+15551230000',
+            name: 'Ada',
+            email: 'ada@example.com',
+            company: 'Analytical Engines',
+            tags: 'VIP, Lead',
+          },
+        },
+      ],
     });
   });
 
@@ -45,7 +74,14 @@ describe('parseBroadcastCsv', () => {
     expect(result).toEqual({
       ok: true,
       duplicates: 0,
-      contacts: [{ phone: '+15551230000', name: 'Ada' }],
+      headers: ['name', 'phone'],
+      contacts: [
+        {
+          phone: '+15551230000',
+          name: 'Ada',
+          columns: { name: 'Ada', phone: '+15551230000' },
+        },
+      ],
     });
   });
 
@@ -63,7 +99,14 @@ describe('parseBroadcastCsv', () => {
     expect(result).toEqual({
       ok: true,
       duplicates: 1,
-      contacts: [{ phone: '+1 (555) 123-0000', name: 'Ada' }],
+      headers: ['phone', 'name'],
+      contacts: [
+        {
+          phone: '+1 (555) 123-0000',
+          name: 'Ada',
+          columns: { phone: '+1 (555) 123-0000', name: 'Ada' },
+        },
+      ],
     });
   });
 
@@ -93,9 +136,18 @@ describe('parseBroadcastCsv', () => {
     expect(result).toEqual({
       ok: true,
       duplicates: 0,
+      headers: ['phone', 'name'],
       contacts: [
-        { phone: '+15551230000', name: 'Ada' },
-        { phone: '+15559990000', name: 'Grace' },
+        {
+          phone: '+15551230000',
+          name: 'Ada',
+          columns: { phone: '+15551230000', name: 'Ada' },
+        },
+        {
+          phone: '+15559990000',
+          name: 'Grace',
+          columns: { phone: '+15559990000', name: 'Grace' },
+        },
       ],
     });
   });

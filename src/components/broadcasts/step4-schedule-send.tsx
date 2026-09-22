@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { MessageTemplate, Tag } from '@/types';
+import { AudienceConfig } from '@/components/broadcasts/step2-select-audience';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -34,26 +35,13 @@ import {
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
-interface AudienceConfig {
-  type: 'all' | 'tags' | 'custom_field' | 'csv' | 'paste';
-  tagIds?: string[];
-  customField?: {
-    fieldId: string;
-    operator: 'is' | 'is_not' | 'contains';
-    value: string;
-  };
-  csvContacts?: { phone: string; name?: string; tags?: string[] }[];
-  applyTagIds?: string[];
-  excludeTagIds?: string[];
-}
-
 interface Step4Props {
   name: string;
   onNameChange: (name: string) => void;
   template: MessageTemplate;
   audience: AudienceConfig;
   onAudienceChange?: (audience: AudienceConfig) => void;
-  variables?: Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>;
+  variables?: Record<string, { type: 'static' | 'field' | 'custom_field' | 'csv_column'; value: string }>;
   headerMediaUrl?: string;
   scheduledAt?: string | null;
   onScheduleChange?: (date: string | null) => void;
@@ -98,12 +86,30 @@ export function Step4ScheduleSend({
     }
     setIsSendingTest(true);
     try {
-      const params: string[] = [];
-      if (variables) {
-        const keys = Object.keys(variables).sort((a, b) => Number(a) - Number(b));
-        for (const k of keys) {
-          params.push(variables[k]?.value || 'Sample');
+      const placeholderMatches = template.body_text.matchAll(/\{\{([a-zA-Z0-9_]+)\}\}/g);
+      const orderedKeys: string[] = [];
+      const seen = new Set<string>();
+      for (const m of placeholderMatches) {
+        if (!seen.has(m[1])) {
+          seen.add(m[1]);
+          orderedKeys.push(m[1]);
         }
+      }
+
+      const params: string[] = [];
+      for (const k of orderedKeys) {
+        const v = variables?.[k];
+        let val = 'Sample';
+        if (v) {
+          if (v.type === 'static' && v.value) {
+            val = v.value;
+          } else if (v.type === 'csv_column') {
+            val = audience.csvContacts?.[0]?.columns?.[v.value] || v.value || 'Sample';
+          } else if (v.type === 'field' || v.type === 'custom_field') {
+            val = v.value || 'Sample';
+          }
+        }
+        params.push(val);
       }
 
       const res = await fetch('/api/whatsapp/broadcast/test-send', {

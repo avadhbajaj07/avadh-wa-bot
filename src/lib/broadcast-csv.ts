@@ -27,6 +27,8 @@ export interface BroadcastCsvContact {
   phone: string;
   name?: string;
   tags?: string[];
+  /** Raw CSV row column values keyed by header name. */
+  columns?: Record<string, string>;
 }
 
 export type BroadcastCsvError =
@@ -39,13 +41,14 @@ export type ParseBroadcastCsvResult =
   | {
       ok: true;
       contacts: BroadcastCsvContact[];
+      headers: string[];
       /** Rows dropped as same-number repeats (or as blank numbers). */
       duplicates: number;
     }
   | { ok: false; error: BroadcastCsvError };
 
 export function parseBroadcastCsv(text: string): ParseBroadcastCsvResult {
-  const { rows, hasPhoneColumn } = parseContactCsv(text);
+  const { rows, headers, hasPhoneColumn } = parseContactCsv(text);
 
   if (!hasPhoneColumn) return { ok: false, error: 'missing_phone_column' };
 
@@ -54,10 +57,12 @@ export function parseBroadcastCsv(text: string): ParseBroadcastCsvResult {
 
   return {
     ok: true,
-    contacts: unique.map(({ phone, name, tagNames }) => ({
+    headers: headers ?? [],
+    contacts: unique.map(({ phone, name, tagNames, columns }) => ({
       phone,
       ...(name ? { name } : {}),
       ...(tagNames && tagNames.length > 0 ? { tags: tagNames } : {}),
+      ...(columns && Object.keys(columns).length > 0 ? { columns } : {}),
     })),
     duplicates,
   };

@@ -275,3 +275,97 @@ describe('buildSendComponents — end-to-end mix', () => {
     expect((components[2] as { index: string }).index).toBe('1');
   });
 });
+
+describe('buildSendComponents — named variables', () => {
+  it('emits body component with parameter_name when template uses named variables', () => {
+    const components = buildSendComponents(
+      row({
+        body_text:
+          'Suite à votre demande concernant {{business_name}} à {{city}}, voici les éléments pour votre activité de {{profession}}.',
+      }),
+      {
+        body: ['Animo Coaching', 'Basel', 'Life Coach'],
+      },
+    );
+
+    expect(components).toEqual([
+      {
+        type: 'body',
+        parameters: [
+          {
+            type: 'text',
+            parameter_name: 'business_name',
+            text: 'Animo Coaching',
+          },
+          {
+            type: 'text',
+            parameter_name: 'city',
+            text: 'Basel',
+          },
+          {
+            type: 'text',
+            parameter_name: 'profession',
+            text: 'Life Coach',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('supports namedBody map for named variables', () => {
+    const components = buildSendComponents(
+      row({
+        body_text: 'Hello {{business_name}} in {{city}}!',
+      }),
+      {
+        namedBody: {
+          city: 'Geneva',
+          business_name: 'Alpha Ltd',
+        },
+      },
+    );
+
+    expect(components).toEqual([
+      {
+        type: 'body',
+        parameters: [
+          {
+            type: 'text',
+            parameter_name: 'business_name',
+            text: 'Alpha Ltd',
+          },
+          {
+            type: 'text',
+            parameter_name: 'city',
+            text: 'Geneva',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('emits named parameter in TEXT header when header has a named variable', () => {
+    const components = buildSendComponents(
+      row({
+        header_type: 'text',
+        header_content: 'Bienvenue chez {{company_name}}',
+      }),
+      {
+        headerText: 'Maruti Digital',
+      },
+    );
+
+    expect(components).toEqual([
+      {
+        type: 'header',
+        parameters: [
+          {
+            type: 'text',
+            parameter_name: 'company_name',
+            text: 'Maruti Digital',
+          },
+        ],
+      },
+    ]);
+  });
+});

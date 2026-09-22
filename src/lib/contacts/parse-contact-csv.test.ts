@@ -34,6 +34,7 @@ describe('parseContactCsv', () => {
       hasPhoneColumn: true,
       hasTagsColumn: true,
       hasCompanyColumn: false,
+      headers: ['phone', 'name', 'tags'],
       rows: [
         {
           phone: '+15551234567',
@@ -41,6 +42,11 @@ describe('parseContactCsv', () => {
           email: undefined,
           company: undefined,
           tagNames: ['VIP', 'Lead'],
+          columns: {
+            phone: '+15551234567',
+            name: 'Alice',
+            tags: 'VIP, Lead',
+          },
         },
         {
           phone: '+15559876543',
@@ -48,6 +54,11 @@ describe('parseContactCsv', () => {
           email: undefined,
           company: undefined,
           tagNames: ['Customer'],
+          columns: {
+            phone: '+15559876543',
+            name: 'Bob',
+            tags: 'Customer',
+          },
         },
       ],
     });
@@ -66,6 +77,10 @@ describe('parseContactCsv', () => {
       email: undefined,
       company: undefined,
       tagNames: [],
+      columns: {
+        phone: '',
+        name: 'Bob',
+      },
     });
   });
 
@@ -77,6 +92,7 @@ describe('parseContactCsv', () => {
       hasPhoneColumn: true,
       hasTagsColumn: false,
       hasCompanyColumn: false,
+      headers: ['phone', 'name'],
       rows: [
         {
           phone: '+15551234567',
@@ -84,8 +100,31 @@ describe('parseContactCsv', () => {
           email: undefined,
           company: undefined,
           tagNames: [],
+          columns: {
+            phone: '+15551234567',
+            name: 'Alice',
+          },
         },
       ],
+    });
+  });
+
+  it('preserves all arbitrary CSV headers and row columns', () => {
+    const csv = `WhatsApp Number,Business/Coach Name,City,Profession
++41774747373,Animo Coaching,Basel,Life Coach`;
+
+    const result = parseContactCsv(csv);
+    expect(result.headers).toEqual([
+      'WhatsApp Number',
+      'Business/Coach Name',
+      'City',
+      'Profession',
+    ]);
+    expect(result.rows[0].columns).toEqual({
+      'WhatsApp Number': '+41774747373',
+      'Business/Coach Name': 'Animo Coaching',
+      City: 'Basel',
+      Profession: 'Life Coach',
     });
   });
 });

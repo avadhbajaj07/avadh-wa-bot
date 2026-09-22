@@ -31,12 +31,17 @@
  */
 
 import type { MessageTemplate, TemplateButton } from '@/types';
-import { extractVariableIndices } from './template-validators';
+import {
+  extractTemplatePlaceholders,
+  extractVariableIndices,
+} from './template-validators';
 
 export interface SendTimeParams {
-  /** Values for body {{1}}, {{2}}, … indexed by variable position. */
+  /** Values for body {{1}}, {{2}}, … or named placeholders in appearance order. */
   body?: string[];
-  /** Value for TEXT-header {{1}}, when the header has a variable. */
+  /** Named body values keyed by placeholder name (e.g. { business_name: 'Acme' }). */
+  namedBody?: Record<string, string>;
+  /** Value for TEXT-header {{1}} or {{name}}, when the header has a variable. */
   headerText?: string;
   /** Override the template's static media URL for this send. */
   headerMediaUrl?: string;
@@ -62,7 +67,7 @@ export type MetaSendComponent =
     };
 
 type MetaSendParameter =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; parameter_name?: string }
   | { type: 'image'; image: { link?: string; id?: string } }
   | { type: 'video'; video: { link?: string; id?: string } }
   | { type: 'document'; document: { link?: string; id?: string } }
@@ -77,20 +82,25 @@ function buildHeaderComponent(
   if (!headerType) return null;
 
   if (headerType === 'text') {
-    // TEXT header with {{1}} → need a value. Static text headers
+    // TEXT header with variable → need a value. Static text headers
     // (no variables) just ride along inside the template itself; no
     // header component required on send.
-    const varCount = extractVariableIndices(template.header_content ?? '').length;
-    if (varCount === 0) return null;
+    const placeholders = extractTemplatePlaceholders(template.header_content ?? '');
+    if (placeholders.length === 0) return null;
     const value = params.headerText;
     if (!value || !value.trim()) {
       throw new Error(
-        'Header text variable {{1}} requires a value — pass headerText.',
+        `Header text variable {{${placeholders[0]}}} requires a value — pass headerText.`,
       );
     }
+    const isPositional = /^\d+$/.test(placeholders[0]);
     return {
       type: 'header',
-      parameters: [{ type: 'text', text: value }],
+      parameters: [
+        isPositional
+          ? { type: 'text', text: value }
+          : { type: 'text', parameter_name: placeholders[0], text: value },
+      ],
     };
   }
 
@@ -127,20 +137,52 @@ function buildBodyComponent(
   template: MessageTemplate,
   params: SendTimeParams,
 ): MetaSendComponent | null {
-  const varCount = extractVariableIndices(template.body_text).length;
+  const placeholders = extractTemplatePlaceholders(template.body_text);
+  const varCount = placeholders.length;
   const body = params.body ?? [];
-  if (varCount === 0 && body.length === 0) return null;
-  if (body.length < varCount) {
+  if (varCount === 0 && body.length === 0 && !params.namedBody) return null;
+
+  const isPositional = varCount > 0 && placeholders.every((p) => /^\d+$/.test(p));
+
+  if (isPositional) {
+    if (body.length < varCount) {
+      throw new Error(
+        `Body has ${varCount} variable(s) but only ${body.length} value(s) were supplied.`,
+      );
+    }
+    // Trim to the variable count — extra values are dropped silently so
+    // a legacy caller that passes too many doesn't error out.
+    const values = body.slice(0, varCount);
+    return {
+      type: 'body',
+      parameters: values.map((text) => ({ type: 'text', text: String(text) })),
+    };
+  }
+
+  // Named variables (e.g. {{business_name}}, {{city}})
+  // Meta requires `parameter_name` for each parameter object.
+  const missing: string[] = [];
+  const parameters = placeholders.map((name, i) => {
+    const text = params.namedBody?.[name] ?? body[i];
+    if (text === undefined || text === null) {
+      missing.push(name);
+    }
+    return {
+      type: 'text' as const,
+      parameter_name: name,
+      text: String(text ?? ''),
+    };
+  });
+
+  if (missing.length > 0 && body.length < varCount && !params.namedBody) {
     throw new Error(
-      `Body has ${varCount} variable(s) but only ${body.length} value(s) were supplied.`,
+      `Body has ${varCount} variable(s) but only ${body.length} value(s) were supplied. Missing: ${missing.join(', ')}`,
     );
   }
-  // Trim to the variable count — extra values are dropped silently so
-  // a legacy caller that passes too many doesn't error out.
-  const values = body.slice(0, varCount);
+
   return {
     type: 'body',
-    parameters: values.map((text) => ({ type: 'text', text: String(text) })),
+    parameters,
   };
 }
 

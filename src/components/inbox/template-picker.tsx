@@ -28,7 +28,10 @@ import {
   Search,
   Video,
 } from "lucide-react";
-import { extractVariableIndices } from "@/lib/whatsapp/template-validators";
+import {
+  extractTemplatePlaceholders,
+  extractVariableIndices,
+} from "@/lib/whatsapp/template-validators";
 import { useTranslations } from "next-intl";
 
 export interface TemplateSendValues {
@@ -45,17 +48,22 @@ interface TemplatePickerProps {
 }
 
 function renderBodyPreview(body: string, params: string[]): string {
-  return (body || "").replace(/\{\{(\d+)\}\}/g, (_, raw) => {
-    const idx = Number(raw) - 1;
-    const value = params[idx];
-    return value && value.trim().length > 0 ? value : `{{${raw}}}`;
+  if (!body) return "";
+  const placeholders = extractTemplatePlaceholders(body);
+  let text = body;
+  placeholders.forEach((name, idx) => {
+    const val = params[idx];
+    if (val && val.trim().length > 0) {
+      text = text.replaceAll(`{{${name}}}`, val);
+    }
   });
+  return text;
 }
 
 function renderHeaderText(header: string, param?: string): string {
   if (!header) return "";
   if (!param || !param.trim()) return header;
-  return header.replace(/\{\{1\}\}/g, param.trim());
+  return header.replace(/\{\{([a-zA-Z0-9_]+)\}\}/g, param.trim());
 }
 
 interface UrlButtonSlot {
@@ -69,15 +77,15 @@ interface UrlButtonSlot {
  * variable, media header url, and per-URL-button suffixes.
  */
 function collectVariableSlots(template: MessageTemplate): {
-  bodyVars: number[];
+  bodyVars: string[];
   headerVarCount: number;
   urlButtonSlots: UrlButtonSlot[];
   isMediaHeader: boolean;
 } {
-  const bodyVars = extractVariableIndices(template.body_text || "");
+  const bodyVars = extractTemplatePlaceholders(template.body_text || "");
   const headerVarCount =
     template.header_type === "text" && template.header_content
-      ? extractVariableIndices(template.header_content).length
+      ? extractTemplatePlaceholders(template.header_content).length
       : 0;
   const isMediaHeader =
     template.header_type === "image" ||

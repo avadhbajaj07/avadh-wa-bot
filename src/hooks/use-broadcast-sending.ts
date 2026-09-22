@@ -10,6 +10,8 @@ import {
 import { normalizeKey } from '@/lib/contacts/dedupe';
 import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 import { resolveImportTagIds } from '@/lib/contacts/resolve-import-tags';
+import { BroadcastCsvContact } from '@/lib/broadcast-csv';
+import { extractTemplatePlaceholders } from '@/lib/whatsapp/template-validators';
 import { Contact, MessageTemplate } from '@/types';
 import { toast } from 'sonner';
 
@@ -25,7 +27,8 @@ export interface AudienceConfig {
   type: 'all' | 'tags' | 'custom_field' | 'csv' | 'paste';
   tagIds?: string[];
   customField?: CustomFieldFilter;
-  csvContacts?: { phone: string; name?: string; tags?: string[] }[];
+  csvContacts?: BroadcastCsvContact[];
+  csvColumns?: string[];
   /** Tags to automatically assign to all imported/pasted contacts in this audience. */
   applyTagIds?: string[];
   /** Contacts carrying any of these tags are subtracted from the result. */
@@ -34,15 +37,16 @@ export interface AudienceConfig {
 
 /**
  * Variable mapping — each template placeholder (by key, usually "1",
- * "2", …) is resolved at send time. `field` maps to a built-in contact
- * field (name/phone/email/company); `custom_field` maps to a
- * contact_custom_values.value row keyed by the custom_fields.id stored
- * in `value`.
+ * "2", … or named like "business_name") is resolved at send time.
+ * `field` maps to a built-in contact field (name/phone/email/company);
+ * `custom_field` maps to contact_custom_values; `csv_column` maps
+ * to the uploaded CSV row's column value.
  */
 export type VariableMapping =
   | { type: 'static'; value: string }
   | { type: 'field'; value: string }
-  | { type: 'custom_field'; value: string };
+  | { type: 'custom_field'; value: string }
+  | { type: 'csv_column'; value: string };
 
 interface BroadcastPayload {
   name: string;
@@ -97,26 +101,30 @@ interface BroadcastApiResult {
 type CustomValueIndex = Map<string, Map<string, string>>;
 
 /**
- * Per-contact resolution of custom-field placeholders. Static and
- * built-in-field mappings resolve synchronously; custom fields read
- * from a pre-built index to avoid N+1 queries during the send loop.
+ * Per-contact resolution of placeholders. Static, built-in field,
+ * CSV column, and custom-field mappings are resolved per recipient.
+ * When `orderedKeys` is passed, the returned values array strictly
+ * follows the template's placeholder appearance order.
  */
 export function resolveVariables(
   variables: Record<string, VariableMapping>,
   contact: Contact,
   customValues?: Map<string, string>,
+  csvRow?: Record<string, string>,
+  orderedKeys?: string[],
 ): string[] {
-  // Keys are typically "1","2",... — numeric-aware sort keeps
-  // {{1}} before {{10}}.
-  const keys = Object.keys(variables).sort((a, b) => {
-    const an = Number(a);
-    const bn = Number(b);
-    if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
-    return a.localeCompare(b);
-  });
+  const keys =
+    orderedKeys ??
+    Object.keys(variables).sort((a, b) => {
+      const an = Number(a);
+      const bn = Number(b);
+      if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn;
+      return a.localeCompare(b);
+    });
 
   return keys.map((key) => {
     const v = variables[key];
+    if (!v) return '';
     if (v.type === 'static') return v.value;
 
     if (v.type === 'field') {
@@ -129,8 +137,15 @@ export function resolveVariables(
       return fieldMap[v.value] ?? '';
     }
 
-    // custom_field
-    return customValues?.get(v.value) ?? '';
+    if (v.type === 'custom_field') {
+      return customValues?.get(v.value) ?? '';
+    }
+
+    if (v.type === 'csv_column') {
+      return csvRow?.[v.value] ?? '';
+    }
+
+    return '';
   });
 }
 
@@ -243,7 +258,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
    */
   async function upsertCsvContacts(
     supabase: ReturnType<typeof createClient>,
-    csvRows: { phone: string; name?: string; tags?: string[] }[],
+    csvRows: BroadcastCsvContact[],
     applyTagIds?: string[],
   ): Promise<Contact[]> {
     if (csvRows.length === 0) return [];
@@ -502,15 +517,39 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             contacts.map((c) => c.id),
           )
         : new Map();
+
+      // Build index of CSV row data by normalized phone
+      const csvDataByPhone = new Map<string, Record<string, string>>();
+      if (payload.audience.csvContacts) {
+        for (const row of payload.audience.csvContacts) {
+          if (row.columns) {
+            const key = normalizeKey(row.phone);
+            if (key) {
+              csvDataByPhone.set(key, row.columns);
+            }
+          }
+        }
+      }
+
+      const templateOrderedKeys = extractTemplatePlaceholders(
+        payload.template.body_text
+      );
+
       const paramsByContact = new Map(
-        contacts.map((contact) => [
-          contact.id,
-          resolveVariables(
-            payload.variables,
-            contact,
-            customValueIndex.get(contact.id),
-          ),
-        ]),
+        contacts.map((contact) => {
+          const key = normalizeKey(contact.phone ?? '');
+          const csvRow = key ? csvDataByPhone.get(key) : undefined;
+          return [
+            contact.id,
+            resolveVariables(
+              payload.variables,
+              contact,
+              customValueIndex.get(contact.id),
+              csvRow,
+              templateOrderedKeys.length > 0 ? templateOrderedKeys : undefined,
+            ),
+          ];
+        }),
       );
       const recipientRows = contacts.map((contact) => ({
         broadcast_id: broadcast.id,

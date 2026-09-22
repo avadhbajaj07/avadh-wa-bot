@@ -11,6 +11,8 @@ export interface ParsedContactRow {
   company?: string;
   /** Tag names from the optional `tags` column (comma/semicolon separated). */
   tagNames: string[];
+  /** Raw column values keyed by header name. */
+  columns?: Record<string, string>;
 }
 
 /** Split a CSV cell into unique tag names (case-insensitive de-dupe). */
@@ -34,6 +36,8 @@ export function parseTagCell(value: string | undefined): string[] {
 
 export interface ParseContactCsvResult {
   rows: ParsedContactRow[];
+  /** Header names in their original case and order. */
+  headers?: string[];
   /**
    * True when the CSV header includes the required `phone` column.
    * `rows` is empty both when the column is missing and when the file
@@ -79,9 +83,10 @@ export function parseContactCsv(text: string): ParseContactCsvResult {
   }
 
   const delimiter = detectDelimiter(lines[0]);
-  const headers = parseCsvLine(lines[0], delimiter).map((h) =>
-    h.trim().toLowerCase().replace(/["']/g, '')
+  const rawHeaders = parseCsvLine(lines[0], delimiter).map((h) =>
+    h.trim().replace(/^["']|["']$/g, '')
   );
+  const headers = rawHeaders.map((h) => h.toLowerCase());
 
   // Flexible header matching
   const phoneIdx = headers.findIndex((h) =>
@@ -138,6 +143,7 @@ export function parseContactCsv(text: string): ParseContactCsvResult {
   if (resolvedPhoneIdx === -1) {
     return {
       rows: [],
+      headers: [],
       hasPhoneColumn: false,
       hasTagsColumn: false,
       hasCompanyColumn: false,
@@ -153,6 +159,15 @@ export function parseContactCsv(text: string): ParseContactCsvResult {
 
     const values = parseCsvLine(line, delimiter);
     const rawPhone = values[resolvedPhoneIdx]?.replace(/["']/g, '').trim() ?? '';
+
+    const rowColumns: Record<string, string> = {};
+    if (!isHeaderless && rawHeaders.length > 0) {
+      rawHeaders.forEach((header, idx) => {
+        if (header && values[idx] !== undefined) {
+          rowColumns[header] = values[idx].replace(/^["']|["']$/g, '').trim();
+        }
+      });
+    }
 
     rows.push({
       phone: rawPhone,
@@ -172,11 +187,13 @@ export function parseContactCsv(text: string): ParseContactCsvResult {
         tagsIdx >= 0
           ? parseTagCell(values[tagsIdx]?.replace(/["']/g, ''))
           : [],
+      ...(Object.keys(rowColumns).length > 0 ? { columns: rowColumns } : {}),
     });
   }
 
   return {
     rows,
+    headers: isHeaderless ? [] : rawHeaders,
     hasPhoneColumn: true,
     hasTagsColumn: tagsIdx >= 0,
     hasCompanyColumn: companyIdx >= 0,
