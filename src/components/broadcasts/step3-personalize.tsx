@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   Trash2,
   ExternalLink,
+  Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -201,7 +202,7 @@ export function Step3Personalize({
         if (hasCsv && audience?.csvColumns) {
           // Look for matching column in csvColumns
           const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
-          const match = audience.csvColumns.find((col) => {
+          let match = audience.csvColumns.find((col) => {
             const normCol = col.toLowerCase().replace(/[^a-z0-9]/g, '');
             return (
               normCol === normalizedKey ||
@@ -209,6 +210,85 @@ export function Step3Personalize({
               normalizedKey.includes(normCol)
             );
           });
+
+          // Semantic aliases for business / company
+          if (
+            !match &&
+            [
+              'business_name',
+              'business',
+              'company',
+              'company_name',
+              'nom_entreprise',
+              'entreprise',
+              'societe',
+            ].includes(lowerKey)
+          ) {
+            match = audience.csvColumns.find((col) => {
+              const c = col.toLowerCase();
+              return (
+                c.includes('company') ||
+                c.includes('business') ||
+                c.includes('entreprise') ||
+                c.includes('societe') ||
+                c.includes('org') ||
+                c.includes('name') ||
+                c === 'nom'
+              );
+            });
+          }
+
+          // Semantic aliases for contact name
+          if (
+            !match &&
+            [
+              'name',
+              'full_name',
+              'first_name',
+              'contact_name',
+              'client_name',
+              'customer_name',
+              'nom',
+              'prenom',
+            ].includes(lowerKey)
+          ) {
+            match = audience.csvColumns.find((col) => {
+              const c = col.toLowerCase();
+              return (
+                c.includes('name') ||
+                c.includes('nom') ||
+                c.includes('prenom') ||
+                c.includes('client') ||
+                c.includes('customer') ||
+                c.includes('contact')
+              );
+            });
+          }
+
+          // Positional aliases (e.g. {{1}} or {{2}})
+          if (!match && /^\d+$/.test(key)) {
+            match = audience.csvColumns.find((col) => {
+              const c = col.toLowerCase();
+              return (
+                c.includes('name') ||
+                c.includes('company') ||
+                c.includes('business') ||
+                c.includes('client')
+              );
+            });
+            if (!match) {
+              match = audience.csvColumns.find((col) => {
+                const c = col.toLowerCase();
+                return (
+                  !c.includes('phone') &&
+                  !c.includes('mobile') &&
+                  !c.includes('number') &&
+                  !c.includes('tel') &&
+                  !c.includes('tag')
+                );
+              });
+            }
+          }
 
           if (match) {
             newVars[key] = { type: 'csv_column', value: match };
@@ -349,7 +429,20 @@ export function Step3Personalize({
         } else if (mapping.type === 'custom_field' && mapping.value) {
           replacement = customValues.get(mapping.value) || placeholder;
         } else if (mapping.type === 'csv_column' && mapping.value) {
-          replacement = firstCsvRow?.[mapping.value] || placeholder;
+          let val = firstCsvRow?.[mapping.value];
+          if (val === undefined && firstCsvRow) {
+            const target = mapping.value.toLowerCase();
+            for (const [k, v] of Object.entries(firstCsvRow)) {
+              if (k.toLowerCase() === target) {
+                val = v;
+                break;
+              }
+            }
+          }
+          if (!val && ['name', 'full_name', 'company', 'business_name', 'business'].includes(mapping.value.toLowerCase())) {
+            val = audience?.csvContacts?.[0]?.name;
+          }
+          replacement = val || placeholder;
         }
       }
       text = text.replaceAll(placeholder, replacement);
@@ -378,6 +471,18 @@ export function Step3Personalize({
         <p className="mt-1 text-sm text-muted-foreground">
           {t('personalize.subtitle')}
         </p>
+      </div>
+
+      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 flex items-start gap-2.5">
+        <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+        <div className="text-xs space-y-0.5">
+          <p className="font-semibold text-foreground">
+            Map Template Attributes to Your Audience
+          </p>
+          <p className="text-muted-foreground">
+            Each placeholder in your template (like <code className="text-primary font-mono font-semibold">{"{{business_name}}"}</code>) can be connected to a column from your uploaded CSV, a contact profile field, or a fixed text value.
+          </p>
+        </div>
       </div>
 
       {mediaHeaderType && (

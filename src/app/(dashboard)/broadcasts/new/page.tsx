@@ -212,6 +212,7 @@ export default function NewBroadcastPage() {
             <Step2SelectAudience
               audience={audience}
               onUpdate={setAudience}
+              template={template}
               onNext={() => setCurrentStep(2)}
               onBack={() => setCurrentStep(0)}
             />

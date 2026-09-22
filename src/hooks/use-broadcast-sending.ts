@@ -155,7 +155,17 @@ export function resolveVariables(
           'entreprise',
         ].includes(lowerKey)
       ) {
-        return contact.company || contact.name || '';
+        let fromCsv: string | undefined;
+        if (csvRow) {
+          for (const [colK, colV] of Object.entries(csvRow)) {
+            const lk = colK.toLowerCase();
+            if (lk.includes('company') || lk.includes('business') || lk === 'name' || lk === 'nom') {
+              fromCsv = colV;
+              break;
+            }
+          }
+        }
+        return fromCsv || contact.company || contact.name || '';
       }
       if (
         [
@@ -168,7 +178,17 @@ export function resolveVariables(
           'prenom',
         ].includes(lowerKey)
       ) {
-        return contact.name || contact.company || '';
+        let fromCsv: string | undefined;
+        if (csvRow) {
+          for (const [colK, colV] of Object.entries(csvRow)) {
+            const lk = colK.toLowerCase();
+            if (lk.includes('name') || lk === 'nom' || lk.includes('client')) {
+              fromCsv = colV;
+              break;
+            }
+          }
+        }
+        return fromCsv || contact.name || contact.company || '';
       }
       return '';
     }
@@ -189,7 +209,19 @@ export function resolveVariables(
     }
 
     if (v.type === 'csv_column') {
-      return csvRow?.[v.value] ?? '';
+      if (!csvRow || !v.value) return '';
+      if (csvRow[v.value] !== undefined) return csvRow[v.value];
+      const targetLower = v.value.toLowerCase();
+      for (const [k, val] of Object.entries(csvRow)) {
+        if (k.toLowerCase() === targetLower) return val;
+      }
+      if (['name', 'full_name', 'contact_name', 'client_name'].includes(targetLower)) {
+        return contact.name || contact.company || '';
+      }
+      if (['company', 'business_name', 'business'].includes(targetLower)) {
+        return contact.company || contact.name || '';
+      }
+      return '';
     }
 
     return '';
@@ -322,7 +354,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
     }
 
     // De-duplicate within the input on the NORMALIZED number
-    const uniqueByKey = new Map<string, { phone: string; name?: string; tags?: string[] }>();
+    const uniqueByKey = new Map<string, BroadcastCsvContact>();
     for (const row of csvRows) {
       const formatted = formatPhoneNumber(row.phone) || row.phone;
       const key = normalizeKey(formatted);
@@ -356,12 +388,25 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
     const missing = keys
       .filter((k) => !byKey.has(k))
       .map((k) => uniqueByKey.get(k)!)
-      .map((row) => ({
-        user_id: user.id,
-        account_id: accountId,
-        phone: row.phone,
-        name: row.name ?? null,
-      }));
+      .map((row) => {
+        let companyVal: string | undefined;
+        if (row.columns) {
+          for (const [k, val] of Object.entries(row.columns)) {
+            const lk = k.toLowerCase();
+            if (lk.includes('company') || lk.includes('business')) {
+              companyVal = val;
+              break;
+            }
+          }
+        }
+        return {
+          user_id: user.id,
+          account_id: accountId,
+          phone: row.phone,
+          name: row.name ?? null,
+          company: companyVal ?? null,
+        };
+      });
 
     const INSERT_CHUNK = 200;
     for (let i = 0; i < missing.length; i += INSERT_CHUNK) {

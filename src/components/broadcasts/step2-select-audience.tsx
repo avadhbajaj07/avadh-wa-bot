@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useMemo, useRef } from 'react';
-import { parseBroadcastCsv, BroadcastCsvContact } from '@/lib/broadcast-csv';
+import {
+  parseBroadcastCsv,
+  BroadcastCsvContact,
+  extractTemplatePlaceholders,
+} from '@/lib/broadcast-csv';
 import { parsePastedNumbers } from '@/lib/contacts/parse-pasted-numbers';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,8 +19,11 @@ import {
   Trash2,
   ClipboardPaste,
   Check,
+  Sparkles,
+  CheckCircle2,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import type { MessageTemplate } from '@/types';
 
 type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv' | 'paste';
 
@@ -39,6 +46,7 @@ interface Step2Props {
   onUpdate: (audience: AudienceConfig) => void;
   onNext: () => void;
   onBack: () => void;
+  template?: MessageTemplate | null;
 }
 
 export function Step2SelectAudience({
@@ -46,6 +54,7 @@ export function Step2SelectAudience({
   onUpdate,
   onNext,
   onBack,
+  template,
 }: Step2Props) {
   const t = useTranslations('Broadcasts.wizard');
 
@@ -89,6 +98,18 @@ export function Step2SelectAudience({
 
   const csvCount = audience.csvContacts?.length ?? 0;
   const csvFileName = csvCount > 0 ? pickedCsvName : null;
+
+  const templatePlaceholders = useMemo(() => {
+    if (!template?.body_text) return [];
+    return extractTemplatePlaceholders(template.body_text);
+  }, [template?.body_text]);
+
+  const displayHeaders = useMemo(() => {
+    if (audience.csvColumns && audience.csvColumns.length > 0) {
+      return audience.csvColumns;
+    }
+    return ['Phone', 'Name', 'Tags'];
+  }, [audience.csvColumns]);
 
   // Real-time parsing of pasted numbers
   const pasteParseResult = useMemo(
@@ -375,26 +396,47 @@ export function Step2SelectAudience({
                         <thead>
                           <tr className="border-b border-border text-muted-foreground">
                             <th className="pb-1 font-medium">#</th>
-                            <th className="pb-1 font-medium">Phone</th>
-                            <th className="pb-1 font-medium">Name</th>
-                            <th className="pb-1 font-medium">Tags</th>
+                            {displayHeaders.map((h) => (
+                              <th key={h} className="pb-1 font-medium capitalize">
+                                {h}
+                              </th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/40 font-mono">
                           {audience.csvContacts?.slice(0, 5).map((c, i) => (
                             <tr key={i} className="text-foreground">
                               <td className="py-1 text-muted-foreground">{i + 1}</td>
-                              <td className="py-1 font-medium text-emerald-400">{c.phone}</td>
-                              <td className="py-1 text-muted-foreground">{c.name || '—'}</td>
-                              <td className="py-1 text-muted-foreground">
-                                {c.tags && c.tags.length > 0 ? (
-                                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
-                                    {c.tags.join(', ')}
-                                  </span>
-                                ) : (
-                                  '—'
-                                )}
-                              </td>
+                              {displayHeaders.map((h) => {
+                                const lowerH = h.toLowerCase();
+                                let val = c.columns?.[h];
+                                if (val === undefined && c.columns) {
+                                  for (const [k, v] of Object.entries(c.columns)) {
+                                    if (k.toLowerCase() === lowerH) {
+                                      val = v;
+                                      break;
+                                    }
+                                  }
+                                }
+                                if (val === undefined) {
+                                  if (lowerH.includes('phone') || lowerH.includes('mobile')) val = c.phone;
+                                  else if (lowerH.includes('name')) val = c.name;
+                                  else if (lowerH.includes('tag')) val = c.tags?.join(', ');
+                                }
+                                const isPhone = lowerH.includes('phone') || lowerH.includes('mobile');
+                                return (
+                                  <td
+                                    key={h}
+                                    className={`py-1 ${
+                                      isPhone
+                                        ? 'font-medium text-emerald-400'
+                                        : 'text-muted-foreground truncate max-w-[200px]'
+                                    }`}
+                                  >
+                                    {val || '—'}
+                                  </td>
+                                );
+                              })}
                             </tr>
                           ))}
                         </tbody>
@@ -405,6 +447,57 @@ export function Step2SelectAudience({
                         </p>
                       )}
                     </div>
+                  </div>
+
+                  {/* Detected CSV Attributes & Next Step helper */}
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-3.5 space-y-2 mt-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-primary font-medium text-xs">
+                        <Sparkles className="h-4 w-4" />
+                        <span>Detected CSV Attributes ({displayHeaders.length})</span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground font-medium">
+                        Step 3: Personalize
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {displayHeaders.map((col) => (
+                        <Badge
+                          key={col}
+                          variant="secondary"
+                          className="font-mono text-[11px] bg-background border border-border text-foreground px-2 py-0.5"
+                        >
+                          {col}
+                        </Badge>
+                      ))}
+                    </div>
+
+                    {templatePlaceholders.length > 0 ? (
+                      <div className="pt-1.5 border-t border-border/40 text-xs text-muted-foreground space-y-1">
+                        <p>
+                          Your template requires attribute(s):{' '}
+                          {templatePlaceholders.map((p) => (
+                            <code
+                              key={p}
+                              className="font-mono font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded text-[11px] mr-1"
+                            >
+                              {'{{' + p + '}}'}
+                            </code>
+                          ))}
+                        </p>
+                        <p className="text-emerald-400 font-medium flex items-center gap-1.5 pt-0.5">
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            Click <strong>Next: Map Attributes & Personalize →</strong> below to link your CSV columns to these attributes.
+                          </span>
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground pt-1 border-t border-border/40">
+                        Click <strong>Next →</strong> to review and finalize your broadcast message.
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -555,9 +648,11 @@ export function Step2SelectAudience({
         <Button
           onClick={onNext}
           disabled={!isValid}
-          className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 gap-2"
         >
-          {t('next')}
+          {csvCount > 0 || (audience.type === 'paste' && (audience.csvContacts?.length ?? 0) > 0)
+            ? 'Next: Map Attributes & Personalize'
+            : t('next')}
           <ArrowRight className="h-4 w-4" />
         </Button>
       </div>

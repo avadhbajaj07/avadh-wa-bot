@@ -83,4 +83,41 @@ describe('resolveVariables with CSV columns and named placeholders', () => {
 
     expect(result).toEqual(['Bonjour', 'Animo Coaching', 'Basel']);
   });
+
+  it('handles case-insensitive CSV column lookup', () => {
+    const csvRow = {
+      'BUSINESS_NAME': 'Acme Corp',
+    };
+
+    const variables = {
+      business_name: { type: 'csv_column' as const, value: 'business_name' },
+    };
+
+    const result = resolveVariables(
+      variables,
+      contact,
+      undefined,
+      csvRow,
+      ['business_name']
+    );
+
+    expect(result).toEqual(['Acme Corp']);
+  });
+
+  it('falls back to CSV columns or contact name/company when unmapped', () => {
+    const csvRow = {
+      Name: 'Esther Arnold - Coaching & Training',
+    };
+
+    // No variables mapped
+    const result = resolveVariables(
+      {},
+      contact,
+      undefined,
+      csvRow,
+      ['business_name']
+    );
+
+    expect(result).toEqual(['Esther Arnold - Coaching & Training']);
+  });
 });
