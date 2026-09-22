@@ -8,6 +8,8 @@ import { Loader2, FileText, ArrowRight, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
 
+import { useAuth } from '@/hooks/use-auth';
+
 const categoryColors: Record<string, string> = {
   Marketing: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
   Utility: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
@@ -23,6 +25,7 @@ interface Step1Props {
 
 export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack }: Step1Props) {
   const t = useTranslations('Broadcasts.wizard');
+  const { accountId } = useAuth();
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,10 +37,16 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
       // Only APPROVED templates can be sent via Meta — anything else
       // would 400 at broadcast time. Hide them rather than letting
       // the user pick a template that will fail.
-      const { data, error: fetchError } = await supabase
+      let query = supabase
         .from('message_templates')
         .select('*')
-        .eq('status', 'APPROVED')
+        .eq('status', 'APPROVED');
+
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      }
+
+      const { data, error: fetchError } = await query
         .order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
@@ -47,7 +56,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, accountId]);
 
   useEffect(() => {
     fetchTemplates();

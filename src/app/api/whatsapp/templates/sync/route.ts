@@ -286,13 +286,42 @@ export async function POST() {
       }
     }
 
+    let pruned = 0
+    const isTruncated = pageCount >= PAGE_CAP && nextUrl !== null
+    if (!isTruncated && errors.length === 0) {
+      const currentMetaIds = new Set(metaTemplates.map((t) => t.id).filter(Boolean))
+      const { data: localTemplates } = await supabase
+        .from('message_templates')
+        .select('id, meta_template_id')
+        .eq('account_id', accountId)
+        .not('meta_template_id', 'is', null)
+
+      const staleIds = (localTemplates ?? [])
+        .filter((row) => row.meta_template_id && !currentMetaIds.has(row.meta_template_id))
+        .map((row) => row.id)
+
+      if (staleIds.length > 0) {
+        const { error: pruneErr } = await supabase
+          .from('message_templates')
+          .delete()
+          .in('id', staleIds)
+
+        if (!pruneErr) {
+          pruned = staleIds.length
+        } else {
+          console.warn('[sync] Failed to prune stale templates:', pruneErr.message)
+        }
+      }
+    }
+
     return NextResponse.json({
       success: errors.length === 0,
       total: metaTemplates.length,
       inserted,
       updated,
+      pruned,
       errors,
-      truncated: pageCount >= PAGE_CAP && nextUrl !== null,
+      truncated: isTruncated,
     })
   } catch (error) {
     // Auth failures map to 401/403 rather than being folded into the

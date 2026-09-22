@@ -119,7 +119,17 @@ export async function DELETE(request: Request) {
         })
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Meta delete failed.'
-        return NextResponse.json({ error: message }, { status: 502 })
+        // If template doesn't exist on Meta or not found, proceed to delete local row
+        if (
+          message.toLowerCase().includes('does not exist') ||
+          message.toLowerCase().includes('not found') ||
+          message.toLowerCase().includes('100') ||
+          message.toLowerCase().includes('cannot find')
+        ) {
+          console.warn('[template delete] Template not found on Meta, proceeding to delete local row:', message)
+        } else {
+          return NextResponse.json({ error: message }, { status: 502 })
+        }
       }
     }
 

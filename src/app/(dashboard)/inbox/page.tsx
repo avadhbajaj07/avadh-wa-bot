@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useCallback, useEffect, useRef } from "react";
+import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
@@ -22,6 +22,32 @@ import { cn } from "@/lib/utils";
 const CONTACT_PANEL_STORAGE_KEY = "wacrm:inbox:contact-panel-open";
 
 // `useSearchParams` (the `?c=<id>` deep link below) requires a Suspense
+function playNotificationChime() {
+  if (typeof window === "undefined") return;
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    // Crisp pleasant two-tone alert (587Hz D5 -> 880Hz A5)
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.3);
+  } catch {
+    // Ignore audio permission errors before user interaction
+  }
+}
+
 // boundary or the production build bails to CSR and errors out. Thin
 // wrapper supplies it; the inner component holds all the inbox state.
 export default function InboxPage() {
@@ -59,6 +85,29 @@ function InboxPageInner() {
    * once on conversationId-change as usual.
    */
   const [resyncToken, setResyncToken] = useState(0);
+
+  // Unread badge in document title so tabs highlight incoming replies
+  const totalUnread = useMemo(() => {
+    return conversations.reduce((acc, c) => acc + (c.unread_count || 0), 0);
+  }, [conversations]);
+
+  useEffect(() => {
+    const baseTitle = "WhatsApp Inbox";
+    if (totalUnread > 0) {
+      document.title = `(${totalUnread}) ${baseTitle}`;
+    } else {
+      document.title = baseTitle;
+    }
+  }, [totalUnread]);
+
+  // Fail-safe background polling: continuously syncs every 10 seconds
+  // so no message can ever be missed or delayed even if WS reconnects.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setResyncToken((n) => n + 1);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   /**
    * Whether the desktop contact sidebar (tags / deals / notes) is shown.
@@ -218,6 +267,14 @@ function InboxPageInner() {
       const newMsg = event.new;
 
       if (event.eventType === "INSERT") {
+        if (newMsg.sender_type === "customer") {
+          playNotificationChime();
+          const preview = newMsg.content_text
+            ? newMsg.content_text.slice(0, 60)
+            : `[${newMsg.content_type || 'Message'}]`;
+          toast.info(`New message: "${preview}"`);
+        }
+
         // Add to messages if it belongs to active conversation
         if (
           activeConversation &&

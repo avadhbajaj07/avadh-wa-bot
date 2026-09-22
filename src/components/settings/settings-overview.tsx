@@ -72,15 +72,21 @@ export function SettingsOverview({
             : Promise.resolve(null),
           supabase
             .from('message_templates')
-            .select('id', { count: 'exact', head: true }),
+            .select('id', { count: 'exact', head: true })
+            .eq('account_id', acctId),
           supabase
             .from('message_templates')
             .select('id', { count: 'exact', head: true })
+            .eq('account_id', acctId)
             .eq('status', 'PENDING'),
           supabase
             .from('tags')
-            .select('id', { count: 'exact', head: true }),
-          supabase.from('custom_fields').select('id', { count: 'exact', head: true }),
+            .select('id', { count: 'exact', head: true })
+            .eq('account_id', acctId),
+          supabase
+            .from('custom_fields')
+            .select('id', { count: 'exact', head: true })
+            .eq('account_id', acctId),
         ]);
 
       if (cancelled) return;

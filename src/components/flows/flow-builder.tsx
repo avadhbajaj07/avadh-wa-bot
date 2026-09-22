@@ -30,6 +30,7 @@ import {
   Check,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { useAuth } from '@/hooks/use-auth';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -275,6 +276,7 @@ function TriggerPanel({
   triggerIssues: ValidationIssue[];
   t: ReturnType<typeof useTranslations>;
 }) {
+  const { accountId } = useAuth();
   const [templateButtons, setTemplateButtons] = useState<
     { templateName: string; buttonText: string }[]
   >([]);
@@ -283,10 +285,15 @@ function TriggerPanel({
     async function fetchButtons() {
       try {
         const supabase = createClient();
-        const { data } = await supabase
+        let query = supabase
           .from('message_templates')
-          .select('name, buttons')
-          .order('name');
+          .select('name, buttons');
+
+        if (accountId) {
+          query = query.eq('account_id', accountId);
+        }
+
+        const { data } = await query.order('name');
         const items: { templateName: string; buttonText: string }[] = [];
         for (const tmpl of data ?? []) {
           if (Array.isArray(tmpl.buttons)) {

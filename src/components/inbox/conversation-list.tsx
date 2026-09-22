@@ -64,7 +64,7 @@ export function ConversationList({
     { label: t("filterClosed"), value: "closed" },
   ], [t]);
 
-  const { user } = useAuth();
+  const { user, accountId } = useAuth();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [mainTab, setMainTab] = useState<'all' | 'active' | 'my'>('all');
@@ -98,9 +98,15 @@ export function ConversationList({
     let cancelled = false;
 
     (async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("conversations")
-        .select(CONVERSATION_SELECT)
+        .select(CONVERSATION_SELECT);
+
+      if (accountId) {
+        query = query.eq("account_id", accountId);
+      }
+
+      const { data, error } = await query
         .order("last_message_at", { ascending: false });
 
       if (cancelled) return;
@@ -127,7 +133,7 @@ export function ConversationList({
     // `resyncToken` is included so the parent can force a refetch when
     // the realtime channel reconnects or the tab regains focus — catches
     // up on any events sent while the WS was disconnected or throttled.
-  }, [resyncToken]);
+  }, [resyncToken, accountId]);
 
   // Tag definitions for the filter picker — loaded once so labels/colours
   // stay stable regardless of which conversations happen to be loaded.
@@ -135,13 +141,17 @@ export function ConversationList({
     const supabase = createClient();
     let cancelled = false;
     (async () => {
-      const { data } = await supabase.from("tags").select("*").order("name");
+      let query = supabase.from("tags").select("*");
+      if (accountId) {
+        query = query.eq("account_id", accountId);
+      }
+      const { data } = await query.order("name");
       if (!cancelled && data) setTags(data as Tag[]);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accountId]);
 
   // Company options are derived from the loaded conversations — there's no
   // separate companies table, and only companies with a live conversation
@@ -235,7 +245,13 @@ export function ConversationList({
     <div className="relative flex h-full w-full flex-col border-r border-border bg-card lg:w-80">
       {/* Chats Header */}
       <div className="flex items-center justify-between px-3.5 pt-3.5 pb-1">
-        <h2 className="text-base font-bold text-foreground">Chats</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-bold text-foreground">Chats</h2>
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Live
+          </span>
+        </div>
         <a
           href="/pipelines"
           className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"

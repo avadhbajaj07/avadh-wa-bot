@@ -28,6 +28,7 @@ import {
   Search,
   Video,
 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 import {
   extractTemplatePlaceholders,
   extractVariableIndices,
@@ -106,6 +107,7 @@ export function TemplatePicker({
   onSelect,
 }: TemplatePickerProps) {
   const t = useTranslations("Inbox.templatePicker");
+  const { accountId } = useAuth();
 
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,12 +137,17 @@ export function TemplatePicker({
         return;
       }
 
-      // Scope by RLS (message_templates_select → is_account_member), NOT by
-      // user_id. Templates are account-owned.
-      const { data, error } = await supabase
+      // Scope by account_id so templates from other accounts never appear
+      let query = supabase
         .from("message_templates")
         .select("*")
-        .eq("status", "APPROVED")
+        .eq("status", "APPROVED");
+
+      if (accountId) {
+        query = query.eq("account_id", accountId);
+      }
+
+      const { data, error } = await query
         .order("created_at", { ascending: false });
 
       if (cancelled) return;

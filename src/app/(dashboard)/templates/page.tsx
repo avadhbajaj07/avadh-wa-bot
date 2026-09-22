@@ -103,7 +103,7 @@ const TEMPLATE_PRESETS: BrowsePreset[] = [
 
 export default function TemplatesPage() {
   const router = useRouter();
-  const { account } = useAuth();
+  const { account, accountId } = useAuth();
   const canManage = useCan('edit-settings');
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -200,9 +200,15 @@ export default function TemplatesPage() {
   async function fetchTemplates() {
     try {
       const supabase = createClient();
-      const { data, error } = await supabase
+      let query = supabase
         .from('message_templates')
-        .select('*')
+        .select('*');
+
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      }
+
+      const { data, error } = await query
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -217,7 +223,7 @@ export default function TemplatesPage() {
 
   useEffect(() => {
     fetchTemplates();
-  }, []);
+  }, [accountId]);
 
   async function handleSyncFromMeta() {
     setSyncing(true);

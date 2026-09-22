@@ -925,67 +925,27 @@ async function processMessage(
   // runner has its own try/catch and never throws. Accounts with
   // no active flows take the runner's early-exit "no_match" path
   // basically for free (one indexed SELECT for the active run).
-  // ============================================================
-  // Check if inbound text or button reply matches "Session Details"
-  const checkText = `${contentText ?? ''} ${interactiveReplyId ?? ''} ${message.text?.body ?? ''}`.toLowerCase()
-  const isSessionDetails = checkText.includes('session') || checkText.includes('detail')
-
-  let flowConsumed = false
-
-  if (isSessionDetails) {
-    flowConsumed = true
-    try {
-      const { phoneNumberId, accessToken } = await loadAccountMetaCredentials(supabaseAdmin(), accountId)
-      const sendTarget = resolveContactSendTarget(contactRecord)
-      if (sendTarget) {
-        const to = sendTarget.target
-        const audioRes = await sendMediaMessage({
-          phoneNumberId,
-          accessToken,
-          to,
-          kind: 'audio',
-          link: 'https://www.shikhabajaj.online/media/session-details.ogg',
-        })
-        await supabaseAdmin().from('messages').insert({
-          conversation_id: conversation.id,
-          sender_type: 'bot',
-          content_type: 'audio',
-          media_url: 'https://www.shikhabajaj.online/media/session-details.ogg',
-          message_id: audioRes.messageId,
-          status: 'sent',
-        })
-        await supabaseAdmin().from('conversations').update({
-          last_message_text: '[audio] Voice Note sent',
-          last_message_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }).eq('id', conversation.id)
-      }
-    } catch (err) {
-      console.error('[webhook] session details voice note send error:', err)
-    }
-  } else {
-    const flowResult = await dispatchInboundToFlows({
-      accountId,
-      userId: configOwnerUserId,
-      contactId: contactRecord.id,
-      conversationId: conversation.id,
-      message:
-        interactiveReplyId
-          ? {
-              kind: 'interactive_reply',
-              reply_id: interactiveReplyId,
-              reply_title: contentText ?? '',
-              meta_message_id: message.id,
-            }
-          : {
-              kind: 'text',
-              text: contentText ?? message.text?.body ?? '',
-              meta_message_id: message.id,
-            },
-      isFirstInboundMessage,
-    })
-    flowConsumed = flowResult.consumed
-  }
+  const flowResult = await dispatchInboundToFlows({
+    accountId,
+    userId: configOwnerUserId,
+    contactId: contactRecord.id,
+    conversationId: conversation.id,
+    message:
+      interactiveReplyId
+        ? {
+            kind: 'interactive_reply',
+            reply_id: interactiveReplyId,
+            reply_title: contentText ?? '',
+            meta_message_id: message.id,
+          }
+        : {
+            kind: 'text',
+            text: contentText ?? message.text?.body ?? '',
+            meta_message_id: message.id,
+          },
+    isFirstInboundMessage,
+  })
+  const flowConsumed = flowResult.consumed
 
   // Fire any automations that react to this webhook event. All dispatches
   // run here (not earlier) so the contact, conversation, and inbound

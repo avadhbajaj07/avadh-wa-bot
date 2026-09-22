@@ -22,6 +22,7 @@ import {
 
 import { useTranslations } from "next-intl";
 import { useCan } from "@/hooks/use-can";
+import { useAuth } from "@/hooks/use-auth";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -88,6 +89,7 @@ const TEMPLATE_ICONS = {
 
 export default function FlowsPage() {
   const router = useRouter();
+  const { accountId } = useAuth();
   const canCreate = useCan("send-messages");
   const t = useTranslations("Flows.list");
   const [flows, setFlows] = useState<FlowRow[]>([]);
@@ -105,13 +107,15 @@ export default function FlowsPage() {
     (async () => {
       try {
         const supabase = createClient();
-        // Auto-ensure Session Details voice note flow exists
-        await fetch("/api/flows/setup-session-flow").catch(() => {});
+        let tmplQuery = supabase.from("message_templates").select("name, buttons");
+        if (accountId) {
+          tmplQuery = tmplQuery.eq("account_id", accountId);
+        }
 
         const [flowsRes, tmplRes, templatesDb] = await Promise.all([
           fetch("/api/flows"),
           fetch("/api/flows/templates"),
-          supabase.from("message_templates").select("name, buttons").order("name"),
+          tmplQuery.order("name"),
         ]);
         if (!flowsRes.ok) {
           throw new Error(`Failed to load flows: ${flowsRes.status}`);

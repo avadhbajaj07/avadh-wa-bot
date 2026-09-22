@@ -62,6 +62,7 @@ import {
 } from "@/components/interactive/interactive-builder"
 import { interactivePayloadPreviewText } from "@/lib/whatsapp/interactive"
 import { createClient } from "@/lib/supabase/client"
+import { useAuth } from "@/hooks/use-auth"
 import {
   childPath,
   insertAt,
@@ -247,6 +248,7 @@ function useResources(): AutomationResources {
 }
 
 function ResourcesProvider({ children }: { children: ReactNode }) {
+  const { accountId } = useAuth()
   const [tags, setTags] = useState<TagRecord[]>([])
   const [members, setMembers] = useState<AccountMember[]>([])
   const [templates, setTemplates] = useState<MessageTemplate[]>([])
@@ -255,22 +257,27 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
   const [stages, setStages] = useState<PipelineStageOption[]>([])
 
   useEffect(() => {
-    let cancelled = false
     const supabase = createClient()
+    let cancelled = false
 
     // Tags, templates and custom fields come straight from the DB — RLS
     // scopes them to the caller's account. Only APPROVED templates can
     // actually be sent (anything else 400s at send time), matching the
     // broadcast picker.
     void (async () => {
+      let tmplQuery = supabase
+        .from("message_templates")
+        .select("*")
+        .eq("status", "APPROVED")
+
+      if (accountId) {
+        tmplQuery = tmplQuery.eq("account_id", accountId)
+      }
+
       const [tagsRes, templatesRes, customFieldsRes, pipelinesRes, stagesRes] =
         await Promise.all([
           supabase.from("tags").select("*").order("name"),
-          supabase
-            .from("message_templates")
-            .select("*")
-            .eq("status", "APPROVED")
-            .order("name"),
+          tmplQuery.order("name"),
           supabase.from("custom_fields").select("*").order("field_name"),
           supabase.from("pipelines").select("id, name").order("name"),
           supabase
