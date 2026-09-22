@@ -50,7 +50,7 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Main Delhi se hoon! 😊 Lekin yeh 5-Day Workshop completely online live Zoom par hoti hai, toh aap apne ghar se aaram se kisi bhi shehar se join kar sakti hain!\n\nMorning aur Evening dono batches available hain. Fees sirf ₹99 hai:\n👉 https://rzp.io/rzp/shikha07',
+        'Main Khargone (M.P.) se hoon! 😊 Lekin yeh 5-Day Workshop completely online live Zoom par hoti hai, toh aap apne ghar se aaram se kisi bhi shehar se join kar sakti hain!\n\nMorning aur Evening dono batches available hain. Fees sirf ₹99 hai:\n👉 https://rzp.io/rzp/shikha07',
     }
   }
 
