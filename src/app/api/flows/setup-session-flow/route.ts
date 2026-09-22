@@ -63,7 +63,7 @@ async function setupSessionFlow(request: Request) {
       return NextResponse.json({ error: 'No account found' }, { status: 400 });
     }
 
-    // Deactivate/archive ALL flows for this account that match "session details" or "session"
+    // 1. Deactivate all flows matching "session" or "detail"
     const { data: existingFlows } = await admin
       .from('flows')
       .select('id, name, status')
@@ -71,16 +71,48 @@ async function setupSessionFlow(request: Request) {
 
     const deactivated: string[] = [];
     for (const f of existingFlows ?? []) {
-      if (f.name?.toLowerCase().includes('session')) {
+      const lower = (f.name ?? '').toLowerCase();
+      if (lower.includes('session') || lower.includes('detail')) {
         await admin.from('flows').update({ status: 'draft' }).eq('id', f.id);
         deactivated.push(f.id);
       }
     }
 
+    // 2. Cancel all active flow runs
+    await admin
+      .from('flow_runs')
+      .update({ status: 'cancelled' })
+      .eq('account_id', accountId)
+      .eq('status', 'active');
+
+    // 3. Find and update any flow_nodes with "clicked" or "Session Details" text
+    const { data: nodes } = await admin
+      .from('flow_nodes')
+      .select('id, flow_id, node_type, config');
+
+    let updatedNodesCount = 0;
+    for (const n of nodes ?? []) {
+      const cfgStr = JSON.stringify(n.config ?? {});
+      if (cfgStr.toLowerCase().includes('clicked') || cfgStr.toLowerCase().includes('here are the details')) {
+        await admin
+          .from('flow_nodes')
+          .update({
+            node_type: 'send_media',
+            config: {
+              media_type: 'audio',
+              media_url: 'https://www.shikhabajaj.online/media/session-details.ogg',
+            },
+          })
+          .eq('id', n.id);
+        updatedNodesCount++;
+      }
+    }
+
     return NextResponse.json({
       success: true,
-      message: 'All session reply flows have been stopped and deactivated.',
+      message: 'Deactivated text flows, cancelled active runs, and updated nodes to voice media.',
       deactivatedFlowIds: deactivated,
+      updatedNodesCount,
     });
   } catch (err) {
     console.error('[setup-session-flow] Unexpected error:', err);
