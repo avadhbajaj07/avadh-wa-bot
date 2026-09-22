@@ -971,59 +971,6 @@ async function processMessage(
     if (interactiveReplyId) {
       automationTriggers.push('interactive_reply')
     }
-
-    // Direct fail-safe for Session Details audio voice note + details
-    const checkText = `${inboundText} ${interactiveReplyId ?? ''}`.toLowerCase()
-    if (checkText.includes('session') || checkText.includes('details')) {
-      try {
-        const { phoneNumberId, accessToken } = await loadAccountMetaCredentials(supabaseAdmin(), accountId)
-        const sendTarget = resolveContactSendTarget(contactRecord)
-        if (sendTarget) {
-          const to = sendTarget.target
-          // 1. Send Voice Note
-          const audioRes = await sendMediaMessage({
-            phoneNumberId,
-            accessToken,
-            to,
-            kind: 'audio',
-            link: 'https://www.shikhabajaj.online/media/session-details.ogg',
-          })
-          await supabaseAdmin().from('messages').insert({
-            conversation_id: conversation.id,
-            sender_type: 'bot',
-            content_type: 'audio',
-            media_url: 'https://www.shikhabajaj.online/media/session-details.ogg',
-            message_id: audioRes.messageId,
-            status: 'sent',
-          })
-
-          // 2. Send Details Text
-          const textBody = `🌸 *5-Day Face Yoga & Anti-Aging Workshop* 🌸\n\n✨ *तारीख:* कल से शुरू (5 दिन का लाइव सेशन)\n⏰ *समय:* सुबह एवं शाम के बैच उपलब्ध\n💰 *फीस:* केवल ₹99/-\n\n👉 रजिस्टर करने के लिए नीचे दिए गए लिंक पर क्लिक करें:\nhttps://www.shikhabajaj.online\n(या 'Register Now' लिखें)`
-          const textRes = await sendTextMessage({
-            phoneNumberId,
-            accessToken,
-            to,
-            text: textBody,
-          })
-          await supabaseAdmin().from('messages').insert({
-            conversation_id: conversation.id,
-            sender_type: 'bot',
-            content_type: 'text',
-            content_text: textBody,
-            message_id: textRes.messageId,
-            status: 'sent',
-          })
-
-          await supabaseAdmin().from('conversations').update({
-            last_message_text: '[audio] Voice Note sent',
-            last_message_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }).eq('id', conversation.id)
-        }
-      } catch (err) {
-        console.error('[webhook] session details fail-safe error:', err)
-      }
-    }
   }
   // new_contact_created fires only when the webhook just auto-created the
   // contact row. first_inbound_message fires whenever this is the contact's
