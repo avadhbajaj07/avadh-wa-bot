@@ -280,8 +280,8 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { code, waba_id, phone_number_id } = body;
 
-    if (!code) {
-      return NextResponse.json({ error: 'Missing code' }, { status: 400 });
+    if (!code && !waba_id) {
+      return NextResponse.json({ error: 'Missing authorization code or WABA ID' }, { status: 400 });
     }
 
     const result = await completeOAuthOnboarding({
@@ -373,7 +373,7 @@ async function exchangeCodeForToken(
 }
 
 async function completeOAuthOnboarding(params: {
-  code: string;
+  code?: string;
   accountId: string;
   userId?: string;
   supabaseClient?: any;
@@ -396,22 +396,33 @@ async function completeOAuthOnboarding(params: {
     redirectUri,
   } = params;
 
-  if (!META_APP_SECRET) {
-    console.error('[OAuth Onboarding] META_APP_SECRET is not set in server environment variables');
+  let accessToken: string;
+
+  if (code) {
+    if (!META_APP_SECRET) {
+      console.error('[OAuth Onboarding] META_APP_SECRET is not set in server environment variables');
+      return {
+        success: false,
+        error:
+          'META_APP_SECRET is not configured on the server. Please add META_APP_SECRET in your Vercel project environment variables (Meta App Dashboard → App Settings → Basic → App Secret).',
+      };
+    }
+
+    // 1. Exchange short-lived code for permanent access token
+    const exchangeRes = await exchangeCodeForToken(code, redirectUri);
+    if (!exchangeRes.accessToken) {
+      return { success: false, error: exchangeRes.error };
+    }
+    accessToken = exchangeRes.accessToken;
+  } else if (process.env.META_SYSTEM_USER_TOKEN) {
+    accessToken = process.env.META_SYSTEM_USER_TOKEN.trim();
+  } else {
     return {
       success: false,
       error:
-        'META_APP_SECRET is not configured on the server. Please add META_APP_SECRET in your Vercel project environment variables (Meta App Dashboard → App Settings → Basic → App Secret).',
+        'Could not complete connection: authorization code was missing from the popup, and META_SYSTEM_USER_TOKEN is not set on the server.',
     };
   }
-
-  // 1. Exchange short-lived code for permanent access token
-  const exchangeRes = await exchangeCodeForToken(code, redirectUri);
-  if (!exchangeRes.accessToken) {
-    return { success: false, error: exchangeRes.error };
-  }
-
-  const accessToken = exchangeRes.accessToken;
 
   // 2. Discover WABA ID if not provided directly
   let wabaId = providedWabaId;

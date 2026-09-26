@@ -120,10 +120,13 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
               phone_number_id: phone_number_id || sessionDataRef.current.phone_number_id,
               waba_id: waba_id || sessionDataRef.current.waba_id,
             };
-            toast.info('Account shared with Avadh Bajaj Tech! Please close the Facebook popup window to complete connection.', {
+            toast.info('Account shared with Avadh Bajaj Tech! Finalizing connection...', {
               id: 'wa-shared-toast',
-              duration: 8000,
+              duration: 6000,
             });
+            if (waba_id) {
+              completeBackendExchange(undefined, waba_id, phone_number_id);
+            }
           } else if (payload.event === 'CANCEL') {
             setIsLaunching(false);
           } else if (payload.event === 'ERROR') {
@@ -152,7 +155,11 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
 
   if (!open) return null;
 
-  const completeBackendExchange = async (code: string) => {
+  const completeBackendExchange = async (
+    code?: string,
+    explicitWabaId?: string,
+    explicitPhoneId?: string
+  ) => {
     if (isHandlingCodeRef.current) return;
     isHandlingCodeRef.current = true;
     setIsSyncing(true);
@@ -160,14 +167,18 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
     try {
       toast.loading('Linking your WhatsApp Business Account...', { id: 'wa-onboarding' });
 
-      // Brief tick in case sessionInfo postMessage with waba_id is in flight
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      if (!explicitWabaId) {
+        // Brief tick in case sessionInfo postMessage with waba_id is in flight
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
 
-      const payload = {
-        code,
-        waba_id: sessionDataRef.current.waba_id,
-        phone_number_id: sessionDataRef.current.phone_number_id,
+      const payload: Record<string, any> = {
+        waba_id: explicitWabaId || sessionDataRef.current.waba_id,
+        phone_number_id: explicitPhoneId || sessionDataRef.current.phone_number_id,
       };
+      if (code) {
+        payload.code = code;
+      }
 
       console.log('[Embedded Signup] Completing backend handshake with payload:', payload);
 
@@ -188,7 +199,9 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'WhatsApp connection failed';
       console.error('[Embedded Signup Handshake Error]:', err);
-      toast.error(msg, { id: 'wa-onboarding' });
+      if (code) {
+        toast.error(msg, { id: 'wa-onboarding' });
+      }
     } finally {
       setIsLaunching(false);
       setIsSyncing(false);
