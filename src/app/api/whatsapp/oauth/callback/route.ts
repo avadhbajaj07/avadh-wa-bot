@@ -227,6 +227,8 @@ export async function GET(request: Request) {
     const exchangeResult = await completeOAuthOnboarding({
       code,
       accountId,
+      userId: user.id,
+      supabaseClient: supabase,
       redirectUri: REDIRECT_URI,
     });
 
@@ -285,6 +287,8 @@ export async function POST(request: Request) {
     const result = await completeOAuthOnboarding({
       code,
       accountId,
+      userId: user.id,
+      supabaseClient: supabase,
       providedWabaId: waba_id,
       providedPhoneNumberId: phone_number_id,
     });
@@ -371,6 +375,8 @@ async function exchangeCodeForToken(
 async function completeOAuthOnboarding(params: {
   code: string;
   accountId: string;
+  userId?: string;
+  supabaseClient?: any;
   providedWabaId?: string;
   providedPhoneNumberId?: string;
   redirectUri?: string;
@@ -380,7 +386,15 @@ async function completeOAuthOnboarding(params: {
   wabaId?: string;
   phoneNumberId?: string;
 }> {
-  const { code, accountId, providedWabaId, providedPhoneNumberId, redirectUri } = params;
+  const {
+    code,
+    accountId,
+    userId,
+    supabaseClient,
+    providedWabaId,
+    providedPhoneNumberId,
+    redirectUri,
+  } = params;
 
   if (!META_APP_SECRET) {
     console.error('[OAuth Onboarding] META_APP_SECRET is not set in server environment variables');
@@ -462,43 +476,53 @@ async function completeOAuthOnboarding(params: {
   const encryptedToken = encrypt(accessToken);
   const verifyToken = encrypt('maruti_webhook_verify');
 
-  const adminDb = getAdminClient();
-
-  // Check if this phone number is claimed by another account
-  const { data: claimed } = await adminDb
-    .from('whatsapp_config')
-    .select('account_id')
-    .eq('phone_number_id', phoneNumberId)
-    .neq('account_id', accountId)
-    .maybeSingle();
-
-  if (claimed) {
-    return {
-      success: false,
-      error: 'This WhatsApp phone number is already connected to another account on this system.',
-    };
+  const db = process.env.SUPABASE_SERVICE_ROLE_KEY ? getAdminClient() : supabaseClient;
+  if (!db) {
+    console.error('[OAuth Onboarding] Neither admin client nor user supabase client available');
+    return { success: false, error: 'Database connection client unavailable' };
   }
 
-  const { error: upsertErr } = await adminDb
+  // Check if this phone number is claimed by another account (best-effort)
+  try {
+    const { data: claimed } = await db
+      .from('whatsapp_config')
+      .select('account_id')
+      .eq('phone_number_id', phoneNumberId)
+      .neq('account_id', accountId)
+      .maybeSingle();
+
+    if (claimed) {
+      return {
+        success: false,
+        error: 'This WhatsApp phone number is already connected to another account on this system.',
+      };
+    }
+  } catch (claimErr) {
+    console.warn('[OAuth Onboarding] Claimed check notice:', claimErr);
+  }
+
+  const rowData: Record<string, any> = {
+    account_id: accountId,
+    phone_number_id: phoneNumberId,
+    waba_id: wabaId,
+    access_token: encryptedToken,
+    verify_token: verifyToken,
+    status: 'connected',
+    registered_at: new Date().toISOString(),
+    connected_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  if (userId) {
+    rowData.user_id = userId;
+  }
+
+  const { error: upsertErr } = await db
     .from('whatsapp_config')
-    .upsert(
-      {
-        account_id: accountId,
-        phone_number_id: phoneNumberId,
-        waba_id: wabaId,
-        access_token: encryptedToken,
-        verify_token: verifyToken,
-        status: 'connected',
-        registered_at: new Date().toISOString(),
-        connected_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'account_id' }
-    );
+    .upsert(rowData, { onConflict: 'account_id' });
 
   if (upsertErr) {
     console.error('[OAuth Onboarding] DB Upsert error:', upsertErr);
-    return { success: false, error: 'Failed to save configuration in database' };
+    return { success: false, error: `Failed to save configuration: ${upsertErr.message}` };
   }
 
   return { success: true, wabaId, phoneNumberId };

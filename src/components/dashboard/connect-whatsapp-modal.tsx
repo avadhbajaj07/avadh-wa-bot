@@ -192,7 +192,7 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
     }
   };
 
-  const handleContinueWithFacebook = async () => {
+  const handleContinueWithFacebook = () => {
     if (!confirmedOtp) {
       toast.error('Please confirm you can receive an OTP on your WhatsApp number.');
       return;
@@ -210,19 +210,9 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
       extrasPayload.featureType = 'whatsapp_business_app_onboarding';
     }
 
-    // Wait up to 1.5s for window.FB to be initialized if it's currently loading
-    let fb = typeof window !== 'undefined' ? window.FB : null;
-    if (!fb) {
-      for (let i = 0; i < 15; i++) {
-        await new Promise((r) => setTimeout(r, 100));
-        if (typeof window !== 'undefined' && window.FB) {
-          fb = window.FB;
-          break;
-        }
-      }
-    }
+    const fb = typeof window !== 'undefined' ? window.FB : null;
 
-    // Official Meta Flow: Facebook JavaScript SDK FB.login
+    // Official Meta Flow: Facebook JavaScript SDK FB.login (synchronous to preserve user gesture)
     if (fb) {
       console.log('[Embedded Signup] Launching via FB.login...');
       fb.login(
