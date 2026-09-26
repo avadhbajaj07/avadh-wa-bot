@@ -27,6 +27,7 @@ import {
 } from '@/lib/whatsapp/template-webhook'
 import { recordOutboundBroadcastMessage } from '@/lib/whatsapp/broadcast-conversation-sync'
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body'
+import { resolveConversationByPhone } from '@/lib/whatsapp/resolve-conversation'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -104,6 +105,19 @@ interface MetaStatusError {
   href?: string
 }
 
+interface WhatsAppMessageEcho {
+  from: string
+  to: string
+  id: string
+  timestamp: string
+  type: string
+  text?: { body: string }
+  image?: { id: string; mime_type: string; caption?: string }
+  video?: { id: string; mime_type: string; caption?: string }
+  document?: { id: string; mime_type: string; filename?: string; caption?: string }
+  audio?: { id: string; mime_type: string }
+}
+
 interface WhatsAppWebhookEntry {
   id: string
   changes: Array<{
@@ -121,6 +135,7 @@ interface WhatsAppWebhookEntry {
         parent_user_id?: string
       }>
       messages?: WhatsAppMessage[]
+      message_echoes?: WhatsAppMessageEcho[]
       statuses?: Array<{
         id: string
         status: string
@@ -349,6 +364,27 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         }
       }
 
+      // Handle WhatsApp Coexistence message echoes (messages sent from the WhatsApp Business mobile app)
+      const echoes =
+        value.message_echoes ||
+        (change.field === 'smb_message_echoes' ? (value.messages as unknown as WhatsAppMessageEcho[]) : undefined)
+      if (echoes && echoes.length > 0) {
+        const phoneNumberId = value.metadata?.phone_number_id
+        if (phoneNumberId) {
+          const { data: configRows } = await supabaseAdmin()
+            .from('whatsapp_config')
+            .select('*')
+            .eq('phone_number_id', phoneNumberId)
+
+          if (configRows && configRows.length === 1) {
+            const config = configRows[0]
+            for (const echo of echoes) {
+              await processMessageEcho(echo, config.account_id, config.user_id)
+            }
+          }
+        }
+      }
+
       // Handle incoming messages
       if (!value.messages || !value.contacts) continue
 
@@ -458,6 +494,82 @@ function isValidStatusTransition(current: string, incoming: string): boolean {
   if (ii < 0) return false // unknown incoming status
   if (ci < 0) return true // unknown current — accept anything on the ladder
   return ii > ci
+}
+
+/**
+ * Process a WhatsApp Coexistence message echo.
+ * When the business sends a message from the official WhatsApp Business mobile
+ * app, Meta delivers an echo to our webhook. We mirror it into conversations
+ * and messages so the web CRM inbox stays synchronized with the phone.
+ */
+async function processMessageEcho(
+  echo: WhatsAppMessageEcho,
+  accountId: string,
+  _configOwnerUserId: string
+) {
+  if (!echo.to || !echo.id) return
+
+  try {
+    // 1. Check if this echo has already been recorded in messages table
+    const { data: existingMsg } = await supabaseAdmin()
+      .from('messages')
+      .select('id')
+      .eq('message_id', echo.id)
+      .maybeSingle()
+
+    if (existingMsg) {
+      return // Already recorded
+    }
+
+    // 2. Resolve or create the conversation for the recipient's phone number
+    const resolved = await resolveConversationByPhone(
+      supabaseAdmin(),
+      accountId,
+      echo.to
+    )
+    if (!resolved?.conversationId) return
+
+    const tsIso = echo.timestamp
+      ? new Date(parseInt(echo.timestamp) * 1000).toISOString()
+      : new Date().toISOString()
+
+    const contentText =
+      echo.text?.body ||
+      echo.image?.caption ||
+      echo.video?.caption ||
+      echo.document?.filename ||
+      `[${echo.type || 'message'}]`
+
+    // 3. Record outbound message from business
+    const { error: insertErr } = await supabaseAdmin().from('messages').insert({
+      conversation_id: resolved.conversationId,
+      sender_type: 'agent',
+      content_type: echo.type === 'text' ? 'text' : 'media',
+      content_text: contentText,
+      message_id: echo.id,
+      status: 'sent',
+      created_at: tsIso,
+    })
+
+    if (insertErr) {
+      console.warn('[webhook] message_echo insert notice:', insertErr.message)
+      return
+    }
+
+    // 4. Update conversation thread summary
+    await supabaseAdmin()
+      .from('conversations')
+      .update({
+        last_message_text: contentText,
+        last_message_at: tsIso,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', resolved.conversationId)
+
+    console.log('[webhook] Recorded Coexistence mobile app echo:', echo.id, 'to', echo.to)
+  } catch (err) {
+    console.error('[webhook] Error processing coexistence message echo:', err)
+  }
 }
 
 async function handleStatusUpdate(status: {

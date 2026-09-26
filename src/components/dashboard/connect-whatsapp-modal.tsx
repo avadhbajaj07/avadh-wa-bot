@@ -29,7 +29,7 @@ interface ConnectWhatsAppModalProps {
 type NumberScenario = 'new_number' | 'active_wa_app' | 'migrate_bsp';
 
 export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsAppModalProps) {
-  const [scenario, setScenario] = useState<NumberScenario>('new_number');
+  const [scenario, setScenario] = useState<NumberScenario>('active_wa_app');
   const [confirmedOtp, setConfirmedOtp] = useState(true);
   const [isLaunching, setIsLaunching] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -120,7 +120,7 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
               phone_number_id: phone_number_id || sessionDataRef.current.phone_number_id,
               waba_id: waba_id || sessionDataRef.current.waba_id,
             };
-            toast.info('Account shared with Avadh Bajaj Tech! Finalizing connection...', {
+            toast.info('WhatsApp Business account authorized! Finalizing connection...', {
               id: 'wa-shared-toast',
               duration: 6000,
             });
@@ -211,7 +211,7 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
 
   const handleContinueWithFacebook = () => {
     if (!confirmedOtp) {
-      toast.error('Please confirm you can receive an OTP on your WhatsApp number.');
+      toast.error('Please confirm the verification requirement before proceeding.');
       return;
     }
 
@@ -220,10 +220,13 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
     sessionDataRef.current = {};
 
     const extrasPayload: Record<string, any> = {
+      version: 'v4',
+      sessionInfoVersion: '3',
       setup: {},
     };
     if (scenario === 'active_wa_app') {
       extrasPayload.featureType = 'whatsapp_business_app_onboarding';
+      extrasPayload.coex = true;
     }
 
     const fb = typeof window !== 'undefined' ? window.FB : null;
@@ -319,7 +322,46 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
 
         {/* 3 Scenario Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-6">
-          {/* Option 1: New Number */}
+          {/* Option 1: Existing WA Business app (Coexistence) */}
+          <div
+            onClick={() => setScenario('active_wa_app')}
+            className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
+              scenario === 'active_wa_app'
+                ? 'border-emerald-600 bg-emerald-50/40 shadow-xs ring-1 ring-emerald-600/30'
+                : 'border-slate-200 hover:border-slate-300'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <div
+                  className={`w-5 h-5 rounded-full border flex items-center justify-center ${
+                    scenario === 'active_wa_app' ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-slate-300'
+                  }`}
+                >
+                  {scenario === 'active_wa_app' && <CheckCircle2 className="w-3.5 h-3.5 fill-white text-emerald-600" />}
+                </div>
+              </div>
+              <p className="text-xs font-bold text-slate-900 leading-snug">
+                Use Existing WhatsApp Business Number
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1 leading-normal">
+                <strong>Coexistence Mode:</strong> Keep using your mobile app! API &amp; phone app work simultaneously on the same number.
+              </p>
+            </div>
+            <div className="mt-3">
+              <span className="inline-block px-2 py-0.5 rounded-md bg-emerald-100 text-[10px] font-bold text-emerald-700">
+                Recommended (Coexistence)
+              </span>
+              <p className="text-[10px] text-emerald-600 font-medium mt-1">
+                No app deletion • Zero chat loss
+              </p>
+            </div>
+          </div>
+
+          {/* Option 2: New Number */}
           <div
             onClick={() => setScenario('new_number')}
             className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
@@ -341,43 +383,15 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
                   {scenario === 'new_number' && <CheckCircle2 className="w-3.5 h-3.5 fill-white text-indigo-600" />}
                 </div>
               </div>
-              <p className="text-xs font-semibold text-slate-800 leading-snug">
-                I want to use a new number that is not active on any WhatsApp app
+              <p className="text-xs font-bold text-slate-900 leading-snug">
+                Use a New / Dedicated Phone Number
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1 leading-normal">
+                For a fresh SIM card or virtual number not currently registered on WhatsApp.
               </p>
             </div>
-            <span className="text-[11px] font-medium text-indigo-600 mt-4 hover:underline">
-              Recommended
-            </span>
-          </div>
-
-          {/* Option 2: Active WA Business app */}
-          <div
-            onClick={() => setScenario('active_wa_app')}
-            className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
-              scenario === 'active_wa_app'
-                ? 'border-indigo-600 bg-indigo-50/40 shadow-xs ring-1 ring-indigo-600/30'
-                : 'border-slate-200 hover:border-slate-300'
-            }`}
-          >
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center">
-                  <MessageSquare className="w-4 h-4" />
-                </div>
-                <div
-                  className={`w-5 h-5 rounded-full border flex items-center justify-center ${
-                    scenario === 'active_wa_app' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
-                  }`}
-                >
-                  {scenario === 'active_wa_app' && <CheckCircle2 className="w-3.5 h-3.5 fill-white text-indigo-600" />}
-                </div>
-              </div>
-              <p className="text-xs font-semibold text-slate-800 leading-snug">
-                I want to use a number currently active on WhatsApp Business app
-              </p>
-            </div>
-            <span className="text-[11px] font-medium text-slate-500 mt-4">
-              Requires delete from app first
+            <span className="text-[11px] font-medium text-slate-500 mt-3">
+              Fresh Cloud API Number
             </span>
           </div>
 
@@ -386,7 +400,7 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
             onClick={() => setScenario('migrate_bsp')}
             className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
               scenario === 'migrate_bsp'
-                ? 'border-indigo-600 bg-indigo-50/40 shadow-xs ring-1 ring-indigo-600/30'
+                ? 'border-purple-600 bg-purple-50/40 shadow-xs ring-1 ring-purple-600/30'
                 : 'border-slate-200 hover:border-slate-300'
             }`}
           >
@@ -397,18 +411,21 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
                 </div>
                 <div
                   className={`w-5 h-5 rounded-full border flex items-center justify-center ${
-                    scenario === 'migrate_bsp' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
+                    scenario === 'migrate_bsp' ? 'border-purple-600 bg-purple-600 text-white' : 'border-slate-300'
                   }`}
                 >
-                  {scenario === 'migrate_bsp' && <CheckCircle2 className="w-3.5 h-3.5 fill-white text-indigo-600" />}
+                  {scenario === 'migrate_bsp' && <CheckCircle2 className="w-3.5 h-3.5 fill-white text-purple-600" />}
                 </div>
               </div>
-              <p className="text-xs font-semibold text-slate-800 leading-snug">
-                Migrate existing API number from Twilio, Wati, Interakt, AiSensy
+              <p className="text-xs font-bold text-slate-900 leading-snug">
+                Migrate from Another BSP
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1 leading-normal">
+                Switch from Twilio, Wati, Interakt, or AiSensy to SandeshAI at 0% markup.
               </p>
             </div>
-            <span className="text-[11px] font-medium text-slate-500 mt-4">
-              0% markup migration
+            <span className="text-[11px] font-medium text-purple-600 mt-3">
+              Keep WABA &amp; Number
             </span>
           </div>
         </div>
@@ -426,9 +443,19 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
               onChange={(e) => setConfirmedOtp(e.target.checked)}
               className="mt-0.5 w-4 h-4 rounded-sm text-indigo-600 border-slate-300 focus:ring-indigo-500"
             />
-            <span>
-              I confirm that I can receive an <strong>OTP (One-Time Password)</strong> via SMS or Phone Call on this phone number.
-            </span>
+            {scenario === 'active_wa_app' ? (
+              <span>
+                I confirm this number is active in the <strong>WhatsApp Business app</strong> on my phone to approve the in-app confirmation notification / code.
+              </span>
+            ) : scenario === 'new_number' ? (
+              <span>
+                I confirm that I can receive an <strong>OTP (One-Time Password)</strong> via SMS or Phone Call on this phone number.
+              </span>
+            ) : (
+              <span>
+                I confirm that I have access to the Meta Business Manager and 2FA PIN for this number.
+              </span>
+            )}
           </label>
         </div>
 
@@ -436,7 +463,16 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
           <div className="p-3 mb-4 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-800 flex items-start gap-2">
             <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
             <div>
-              <strong>Facebook Onboarding In Progress:</strong> Complete the steps in Meta's popup. Once you see the confirmation toast (<em>&quot;Your account was successfully shared with Avadh Bajaj Tech whatsapp&quot;</em>), close the popup window or click Finish to complete.
+              <strong>Facebook Onboarding In Progress:</strong>{' '}
+              {scenario === 'active_wa_app' ? (
+                <>
+                  Meta is linking your existing WhatsApp Business app. Approve the prompt on your mobile phone if requested. Once you see the green success notification, close the popup to finish.
+                </>
+              ) : (
+                <>
+                  Complete the steps in Meta&apos;s popup. Once you see the confirmation toast, close the popup window or click Finish to complete.
+                </>
+              )}
             </div>
           </div>
         )}
