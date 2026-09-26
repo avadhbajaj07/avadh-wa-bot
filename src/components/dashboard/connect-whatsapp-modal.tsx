@@ -1,16 +1,23 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   MessageSquare,
   Phone,
   ArrowLeftRight,
   ShieldCheck,
   X,
-  ExternalLink,
   CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+
+declare global {
+  interface Window {
+    FB?: any;
+    fbAsyncInit?: () => void;
+  }
+}
 
 interface ConnectWhatsAppModalProps {
   open: boolean;
@@ -24,6 +31,7 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
   const [scenario, setScenario] = useState<NumberScenario>('new_number');
   const [confirmedOtp, setConfirmedOtp] = useState(true);
   const [isLaunching, setIsLaunching] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Embedded Signup Meta Config
   const appId = process.env.NEXT_PUBLIC_META_APP_ID || '1543169234022851';
@@ -32,25 +40,83 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
     ? `${window.location.origin}/api/whatsapp/oauth/callback`
     : 'https://www.shikhabajaj.online/api/whatsapp/oauth/callback';
 
+  // Captured data from Meta postMessage & FB.login
+  const sessionDataRef = useRef<{ waba_id?: string; phone_number_id?: string }>({});
+  const isHandlingCodeRef = useRef(false);
+
+  // Load and initialize Facebook JavaScript SDK
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    window.fbAsyncInit = function () {
+      if (window.FB) {
+        window.FB.init({
+          appId: appId,
+          cookie: true,
+          xfbml: false,
+          version: 'v22.0',
+        });
+        console.log('[FB SDK] Initialized with App ID:', appId);
+      }
+    };
+
+    if (!document.getElementById('facebook-jssdk')) {
+      const script = document.createElement('script');
+      script.id = 'facebook-jssdk';
+      script.src = 'https://connect.facebook.net/en_US/sdk.js';
+      script.async = true;
+      script.defer = true;
+      script.crossOrigin = 'anonymous';
+      document.body.appendChild(script);
+    } else if (window.FB) {
+      try {
+        window.FB.init({
+          appId: appId,
+          cookie: true,
+          xfbml: false,
+          version: 'v22.0',
+        });
+      } catch (err) {
+        console.warn('[FB SDK] Re-init notice:', err);
+      }
+    }
+  }, [appId]);
+
   // Listen for Embedded Signup completion message from Facebook popup or callback
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
-      const isFacebook = event.origin.endsWith('facebook.com');
+      const isFacebook = typeof event.origin === 'string' && event.origin.endsWith('facebook.com');
       const isSelf = typeof window !== 'undefined' && event.origin === window.location.origin;
       if (!isFacebook && !isSelf) return;
 
       try {
         const payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        if (
-          payload.type === 'WA_EMBEDDED_SIGNUP' ||
-          payload.type === 'WA_EMBEDDED_SIGNUP_SUCCESS'
-        ) {
+
+        // Event from Meta Embedded Signup popup
+        if (payload.type === 'WA_EMBEDDED_SIGNUP') {
           console.log('[Embedded Signup Message Event]:', payload);
+          if (payload.event === 'FINISH') {
+            const { phone_number_id, waba_id } = payload.data || {};
+            sessionDataRef.current = {
+              phone_number_id: phone_number_id || sessionDataRef.current.phone_number_id,
+              waba_id: waba_id || sessionDataRef.current.waba_id,
+            };
+          } else if (payload.event === 'CANCEL') {
+            setIsLaunching(false);
+          } else if (payload.event === 'ERROR') {
+            toast.error(payload.data?.error_message || 'WhatsApp Onboarding Error');
+            setIsLaunching(false);
+          }
+        }
+
+        // Response from popup OAuth redirect fallback
+        if (payload.type === 'WA_EMBEDDED_SIGNUP_SUCCESS') {
           toast.success('WhatsApp Business Account authorized successfully!');
           onSuccess?.();
           onClose();
         } else if (payload.type === 'WA_EMBEDDED_SIGNUP_ERROR') {
           toast.error(payload.error || 'WhatsApp connection failed.');
+          setIsLaunching(false);
         }
       } catch {
         // Ignore unparseable postMessages from browser extensions
@@ -63,6 +129,50 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
 
   if (!open) return null;
 
+  const completeBackendExchange = async (code: string) => {
+    if (isHandlingCodeRef.current) return;
+    isHandlingCodeRef.current = true;
+    setIsSyncing(true);
+
+    try {
+      toast.loading('Linking your WhatsApp Business Account...', { id: 'wa-onboarding' });
+
+      // Brief tick in case sessionInfo postMessage with waba_id is in flight
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const payload = {
+        code,
+        waba_id: sessionDataRef.current.waba_id,
+        phone_number_id: sessionDataRef.current.phone_number_id,
+      };
+
+      console.log('[Embedded Signup] Completing backend handshake with payload:', payload);
+
+      const res = await fetch('/api/whatsapp/oauth/callback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to complete WhatsApp connection');
+      }
+
+      toast.success('WhatsApp Business Account connected successfully!', { id: 'wa-onboarding' });
+      onSuccess?.();
+      onClose();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'WhatsApp connection failed';
+      console.error('[Embedded Signup Handshake Error]:', err);
+      toast.error(msg, { id: 'wa-onboarding' });
+    } finally {
+      setIsLaunching(false);
+      setIsSyncing(false);
+      isHandlingCodeRef.current = false;
+    }
+  };
+
   const handleContinueWithFacebook = () => {
     if (!confirmedOtp) {
       toast.error('Please confirm you can receive an OTP on your WhatsApp number.');
@@ -70,6 +180,8 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
     }
 
     setIsLaunching(true);
+    isHandlingCodeRef.current = false;
+    sessionDataRef.current = {};
 
     const extrasPayload: Record<string, string> = {
       version: 'v4',
@@ -79,32 +191,50 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
       extrasPayload.featureType = 'whatsapp_business_app_onboarding';
     }
 
-    const extras = encodeURIComponent(JSON.stringify(extrasPayload));
-
-    const targetUrl = `https://business.facebook.com/messaging/whatsapp/onboard/?app_id=${appId}&config_id=${configId}&extras=${extras}&redirect_uri=${encodeURIComponent(
-      redirectUri
-    )}`;
-
-    // Open as centered popup window
-    const width = 600;
-    const height = 700;
-    const left = window.screen.width / 2 - width / 2;
-    const top = window.screen.height / 2 - height / 2;
-
-    const popup = window.open(
-      targetUrl,
-      'MetaEmbeddedSignup',
-      `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,status=no,toolbar=no`
-    );
-
-    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-      // Popup blocker active — redirect full window
-      window.location.href = targetUrl;
+    // Official Meta Flow: Facebook JavaScript SDK FB.login
+    if (typeof window !== 'undefined' && window.FB) {
+      console.log('[Embedded Signup] Launching via FB.login...');
+      window.FB.login(
+        (response: any) => {
+          console.log('[FB.login response]:', response);
+          if (response.authResponse?.code) {
+            completeBackendExchange(response.authResponse.code);
+          } else {
+            console.warn('[FB.login] No authResponse code returned:', response);
+            setIsLaunching(false);
+          }
+        },
+        {
+          config_id: configId,
+          response_type: 'code',
+          override_default_response_type: true,
+          extras: extrasPayload,
+        }
+      );
     } else {
-      popup.focus();
-    }
+      // Fallback: If FB SDK is blocked by browser ad blocker, use standard OAuth dialog
+      console.log('[Embedded Signup] FB SDK not loaded, using direct dialog popup...');
+      const targetUrl = `https://www.facebook.com/v22.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(
+        redirectUri
+      )}&config_id=${configId}&response_type=code&extras=${encodeURIComponent(JSON.stringify(extrasPayload))}`;
 
-    setIsLaunching(false);
+      const width = 600;
+      const height = 750;
+      const left = window.screen.width / 2 - width / 2;
+      const top = window.screen.height / 2 - height / 2;
+
+      const popup = window.open(
+        targetUrl,
+        'MetaEmbeddedSignup',
+        `width=${width},height=${height},top=${top},left=${left},scrollbars=yes,status=no,toolbar=no`
+      );
+
+      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        window.location.href = targetUrl;
+      } else {
+        popup.focus();
+      }
+    }
   };
 
   return (
@@ -257,19 +387,34 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <button
               onClick={onClose}
-              className="w-1/2 sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-semibold transition-colors"
+              disabled={isLaunching || isSyncing}
+              className="w-1/2 sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm font-semibold transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               onClick={handleContinueWithFacebook}
-              disabled={isLaunching}
-              className="w-1/2 sm:w-auto px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-md shadow-blue-200 hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2"
+              disabled={isLaunching || isSyncing}
+              className="w-1/2 sm:w-auto px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-semibold shadow-md shadow-blue-200 hover:-translate-y-0.5 transition-all flex items-center justify-center gap-2"
             >
-              <svg className="w-4 h-4 fill-white" viewBox="0 0 24 24">
-                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-              </svg>
-              {isLaunching ? 'Connecting...' : 'Continue with Facebook'}
+              {isSyncing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  Linking Account...
+                </>
+              ) : isLaunching ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  Waiting for Meta...
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4 fill-white" viewBox="0 0 24 24">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                  </svg>
+                  Continue with Facebook
+                </>
+              )}
             </button>
           </div>
         </div>

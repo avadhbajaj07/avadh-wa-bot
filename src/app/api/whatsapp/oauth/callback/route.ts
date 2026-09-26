@@ -192,6 +192,7 @@ export async function GET(request: Request) {
     const exchangeResult = await completeOAuthOnboarding({
       code,
       accountId,
+      redirectUri: REDIRECT_URI,
     });
 
     if (!exchangeResult.success) {
@@ -268,34 +269,100 @@ export async function POST(request: Request) {
   }
 }
 
+async function exchangeCodeForToken(
+  code: string,
+  preferredRedirectUri?: string
+): Promise<{ accessToken?: string; error?: string }> {
+  const tryExchange = async (redirectUriParam?: string) => {
+    const params = new URLSearchParams({
+      client_id: META_APP_ID,
+      client_secret: META_APP_SECRET,
+      code,
+    });
+    if (redirectUriParam !== undefined) {
+      params.set('redirect_uri', redirectUriParam);
+    }
+
+    const res = await fetch(`https://graph.facebook.com/v22.0/oauth/access_token?${params.toString()}`);
+    const data = (await res.json()) as TokenExchangeResponse;
+    return { ok: res.ok, data };
+  };
+
+  // Attempt 1: Without redirect_uri (standard for FB.login popup)
+  const attempt1 = await tryExchange();
+  if (attempt1.ok && attempt1.data.access_token) {
+    return { accessToken: attempt1.data.access_token };
+  }
+
+  // Attempt 2: With preferredRedirectUri or default REDIRECT_URI (standard for OAuth redirect dialog)
+  const uriToTry = preferredRedirectUri || REDIRECT_URI;
+  console.warn(
+    '[OAuth Exchange] Attempt without redirect_uri failed:',
+    attempt1.data.error?.message,
+    'Trying with redirect_uri:',
+    uriToTry
+  );
+  const attempt2 = await tryExchange(uriToTry);
+  if (attempt2.ok && attempt2.data.access_token) {
+    return { accessToken: attempt2.data.access_token };
+  }
+
+  // Attempt 3: With empty redirect_uri (needed by some Meta SDK configurations)
+  console.warn(
+    '[OAuth Exchange] Attempt with redirect_uri failed:',
+    attempt2.data.error?.message,
+    'Trying with empty redirect_uri...'
+  );
+  const attempt3 = await tryExchange('');
+  if (attempt3.ok && attempt3.data.access_token) {
+    return { accessToken: attempt3.data.access_token };
+  }
+
+  const errMsg =
+    attempt1.data.error?.message ||
+    attempt2.data.error?.message ||
+    attempt3.data.error?.message ||
+    'Failed to exchange authorization code with Meta';
+
+  console.error('[OAuth Exchange Error] All attempts failed:', {
+    attempt1: attempt1.data.error,
+    attempt2: attempt2.data.error,
+    attempt3: attempt3.data.error,
+  });
+
+  return { error: errMsg };
+}
+
 async function completeOAuthOnboarding(params: {
   code: string;
   accountId: string;
   providedWabaId?: string;
   providedPhoneNumberId?: string;
+  redirectUri?: string;
 }): Promise<{
   success: boolean;
   error?: string;
   wabaId?: string;
   phoneNumberId?: string;
 }> {
-  const { code, accountId, providedWabaId, providedPhoneNumberId } = params;
+  const { code, accountId, providedWabaId, providedPhoneNumberId, redirectUri } = params;
 
-  // 1. Exchange short-lived code for permanent access token
-  const tokenUrl = `https://graph.facebook.com/v22.0/oauth/access_token?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(
-    REDIRECT_URI
-  )}&client_secret=${META_APP_SECRET}&code=${code}`;
-
-  const tokenRes = await fetch(tokenUrl);
-  const tokenData = (await tokenRes.json()) as TokenExchangeResponse;
-
-  if (!tokenRes.ok || !tokenData.access_token) {
-    const errMsg = tokenData.error?.message || 'Failed to exchange authorization code with Meta';
-    console.error('[OAuth Exchange] Token error:', tokenData);
-    return { success: false, error: errMsg };
+  if (!META_APP_SECRET) {
+    console.error('[OAuth Onboarding] META_APP_SECRET is not set in server environment variables');
+    return {
+      success: false,
+      error:
+        'META_APP_SECRET is not configured on the server. Please add META_APP_SECRET in your Vercel project environment variables (Meta App Dashboard → App Settings → Basic → App Secret).',
+    };
   }
 
-  const accessToken = tokenData.access_token;
+  // 1. Exchange short-lived code for permanent access token
+  const exchangeRes = await exchangeCodeForToken(code, redirectUri);
+  if (!exchangeRes.accessToken) {
+    return { success: false, error: exchangeRes.error };
+  }
+
+  const accessToken = exchangeRes.accessToken;
 
   // 2. Discover WABA ID if not provided directly
   let wabaId = providedWabaId;
