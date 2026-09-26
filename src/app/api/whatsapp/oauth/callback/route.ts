@@ -15,7 +15,11 @@ function getAdminClient() {
 
 const META_APP_ID = process.env.META_APP_ID || '1543169234022851';
 // In wacrm, META_APP_SECRET may be comma-separated if multiple apps are used
-const META_APP_SECRET = (process.env.META_APP_SECRET || '').split(',')[0].trim();
+const META_APP_SECRET = (
+  process.env.META_APP_SECRET || 'f19608b367683fa9be3eaa3972d3f78b'
+)
+  .split(',')[0]
+  .trim();
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.shikhabajaj.online').replace(/\/$/, '');
 const REDIRECT_URI = `${SITE_URL}/api/whatsapp/oauth/callback`;
 
