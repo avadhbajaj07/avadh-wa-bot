@@ -55,6 +55,97 @@ interface PhoneNumbersResponse {
   }>;
 }
 
+function renderAuthResultHtml(options: { success: boolean; message: string; error?: string }) {
+  const { success, message, error } = options;
+  const redirectUrl = success ? '/dashboard?connected=true' : `/dashboard?oauth_error=${encodeURIComponent(error || message)}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>${success ? 'WhatsApp Connected' : 'Connection Incomplete'}</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #0f172a;
+      color: #f8fafc;
+      text-align: center;
+      padding: 20px;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 36px 28px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: ${success ? 'rgba(37, 211, 102, 0.15)' : 'rgba(239, 68, 68, 0.15)'};
+      color: ${success ? '#25d366' : '#ef4444'};
+      font-size: 28px;
+      margin-bottom: 16px;
+    }
+    h2 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      font-weight: 700;
+      color: ${success ? '#f8fafc' : '#ef4444'};
+    }
+    p {
+      margin: 0 0 16px;
+      color: #94a3b8;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">${success ? '✓' : '✕'}</div>
+    <h2>${success ? 'WhatsApp Connected!' : 'Connection Incomplete'}</h2>
+    <p>${message}</p>
+    <p style="font-size: 12px; color: #64748b;">This window will close automatically...</p>
+  </div>
+  <script>
+    try {
+      if (window.opener) {
+        window.opener.postMessage({
+          type: '${success ? 'WA_EMBEDDED_SIGNUP_SUCCESS' : 'WA_EMBEDDED_SIGNUP_ERROR'}',
+          connected: ${success},
+          error: ${JSON.stringify(error || null)}
+        }, '*');
+        setTimeout(() => window.close(), 1500);
+      } else {
+        setTimeout(() => {
+          window.location.href = '${redirectUrl}';
+        }, 1500);
+      }
+    } catch (e) {
+      window.location.href = '${redirectUrl}';
+    }
+  </script>
+</body>
+</html>`;
+
+  return new NextResponse(html, {
+    status: success ? 200 : 400,
+    headers: { 'Content-Type': 'text/html' },
+  });
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
@@ -63,9 +154,11 @@ export async function GET(request: Request) {
 
   if (error || !code) {
     console.error('[OAuth Callback GET] Error from Meta:', error, errorDescription);
-    return NextResponse.redirect(
-      new URL(`/dashboard?oauth_error=${encodeURIComponent(errorDescription || error || 'Missing authorization code')}`, SITE_URL)
-    );
+    return renderAuthResultHtml({
+      success: false,
+      message: errorDescription || error || 'Missing authorization code from Meta',
+      error: errorDescription || error || 'Missing code',
+    });
   }
 
   const supabase = await createClient();
@@ -88,9 +181,11 @@ export async function GET(request: Request) {
 
   const accountId = profile?.account_id;
   if (!accountId) {
-    return NextResponse.redirect(
-      new URL('/dashboard?oauth_error=No+account+linked+to+your+profile', SITE_URL)
-    );
+    return renderAuthResultHtml({
+      success: false,
+      message: 'No active business account linked to your user profile',
+      error: 'No account linked',
+    });
   }
 
   try {
@@ -100,16 +195,25 @@ export async function GET(request: Request) {
     });
 
     if (!exchangeResult.success) {
-      return NextResponse.redirect(
-        new URL(`/dashboard?oauth_error=${encodeURIComponent(exchangeResult.error || 'Connection failed')}`, SITE_URL)
-      );
+      return renderAuthResultHtml({
+        success: false,
+        message: exchangeResult.error || 'Connection failed with Meta API',
+        error: exchangeResult.error,
+      });
     }
 
-    return NextResponse.redirect(new URL('/dashboard?connected=true', SITE_URL));
+    return renderAuthResultHtml({
+      success: true,
+      message: 'Your WhatsApp Business Account is now linked and ready to send messages!',
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error during OAuth exchange';
     console.error('[OAuth Callback GET] Unexpected failure:', err);
-    return NextResponse.redirect(new URL(`/dashboard?oauth_error=${encodeURIComponent(message)}`, SITE_URL));
+    return renderAuthResultHtml({
+      success: false,
+      message,
+      error: message,
+    });
   }
 }
 

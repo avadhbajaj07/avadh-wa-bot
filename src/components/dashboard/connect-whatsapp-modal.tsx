@@ -32,20 +32,25 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
     ? `${window.location.origin}/api/whatsapp/oauth/callback`
     : 'https://www.shikhabajaj.online/api/whatsapp/oauth/callback';
 
-  // Listen for Embedded Signup completion message from Facebook popup
+  // Listen for Embedded Signup completion message from Facebook popup or callback
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
-      if (!event.origin.endsWith('facebook.com')) return;
+      const isFacebook = event.origin.endsWith('facebook.com');
+      const isSelf = typeof window !== 'undefined' && event.origin === window.location.origin;
+      if (!isFacebook && !isSelf) return;
 
       try {
         const payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-        if (payload.type === 'WA_EMBEDDED_SIGNUP') {
+        if (
+          payload.type === 'WA_EMBEDDED_SIGNUP' ||
+          payload.type === 'WA_EMBEDDED_SIGNUP_SUCCESS'
+        ) {
           console.log('[Embedded Signup Message Event]:', payload);
-          if (payload.data?.waba_id) {
-            toast.success('WhatsApp Business Account authorized! Syncing connection...');
-            onSuccess?.();
-            onClose();
-          }
+          toast.success('WhatsApp Business Account authorized successfully!');
+          onSuccess?.();
+          onClose();
+        } else if (payload.type === 'WA_EMBEDDED_SIGNUP_ERROR') {
+          toast.error(payload.error || 'WhatsApp connection failed.');
         }
       } catch {
         // Ignore unparseable postMessages from browser extensions
@@ -66,13 +71,15 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
 
     setIsLaunching(true);
 
-    const extras = encodeURIComponent(
-      JSON.stringify({
-        version: 'v4',
-        sessionInfoVersion: '3',
-        featureType: 'whatsapp_business_app_onboarding',
-      })
-    );
+    const extrasPayload: Record<string, string> = {
+      version: 'v4',
+      sessionInfoVersion: '3',
+    };
+    if (scenario === 'active_wa_app') {
+      extrasPayload.featureType = 'whatsapp_business_app_onboarding';
+    }
+
+    const extras = encodeURIComponent(JSON.stringify(extrasPayload));
 
     const targetUrl = `https://business.facebook.com/messaging/whatsapp/onboard/?app_id=${appId}&config_id=${configId}&extras=${extras}&redirect_uri=${encodeURIComponent(
       redirectUri
