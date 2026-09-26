@@ -120,6 +120,10 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
               phone_number_id: phone_number_id || sessionDataRef.current.phone_number_id,
               waba_id: waba_id || sessionDataRef.current.waba_id,
             };
+            toast.info('Account shared with Avadh Bajaj Tech! Please close the Facebook popup window to complete connection.', {
+              id: 'wa-shared-toast',
+              duration: 8000,
+            });
           } else if (payload.event === 'CANCEL') {
             setIsLaunching(false);
           } else if (payload.event === 'ERROR') {
@@ -202,9 +206,8 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
     isHandlingCodeRef.current = false;
     sessionDataRef.current = {};
 
-    const extrasPayload: Record<string, string> = {
-      version: 'v4',
-      sessionInfoVersion: '3',
+    const extrasPayload: Record<string, any> = {
+      setup: {},
     };
     if (scenario === 'active_wa_app') {
       extrasPayload.featureType = 'whatsapp_business_app_onboarding';
@@ -415,6 +418,15 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
             </span>
           </label>
         </div>
+
+        {isLaunching && (
+          <div className="p-3 mb-4 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-800 flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+            <div>
+              <strong>Facebook Onboarding In Progress:</strong> Complete the steps in Meta's popup. Once you see the confirmation toast (<em>&quot;Your account was successfully shared with Avadh Bajaj Tech whatsapp&quot;</em>), close the popup window or click Finish to complete.
+            </div>
+          </div>
+        )}
 
         {/* Action Footer */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-100">
