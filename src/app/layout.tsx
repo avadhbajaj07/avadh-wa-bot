@@ -114,6 +114,25 @@ export default async function RootLayout({
             <ThemedToaster />
           </ThemeProvider>
         </NextIntlClientProvider>
+        <Script
+          id="facebook-jssdk"
+          src="https://connect.facebook.net/en_US/sdk.js"
+          strategy="lazyOnload"
+        />
+        <Script id="facebook-jssdk-init" strategy="lazyOnload">
+          {`
+            window.fbAsyncInit = function() {
+              if (window.FB) {
+                window.FB.init({
+                  appId: '1543169234022851',
+                  cookie: true,
+                  xfbml: false,
+                  version: 'v22.0'
+                });
+              }
+            };
+          `}
+        </Script>
       </body>
     </html>
   );

@@ -57,13 +57,13 @@ interface PhoneNumbersResponse {
 
 function renderAuthResultHtml(options: { success: boolean; message: string; error?: string }) {
   const { success, message, error } = options;
-  const redirectUrl = success ? '/dashboard?connected=true' : `/dashboard?oauth_error=${encodeURIComponent(error || message)}`;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>${success ? 'WhatsApp Connected' : 'Connection Incomplete'}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -81,8 +81,8 @@ function renderAuthResultHtml(options: { success: boolean; message: string; erro
       background: #1e293b;
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 20px;
-      padding: 36px 28px;
-      max-width: 420px;
+      padding: 32px 24px;
+      max-width: 440px;
       width: 100%;
       box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
     }
@@ -110,6 +110,34 @@ function renderAuthResultHtml(options: { success: boolean; message: string; erro
       font-size: 14px;
       line-height: 1.5;
     }
+    .error-box {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: #fca5a5;
+      margin-bottom: 20px;
+      text-align: left;
+      word-break: break-word;
+      line-height: 1.4;
+    }
+    .btn {
+      display: inline-block;
+      padding: 10px 24px;
+      background: ${success ? '#25d366' : '#334155'};
+      color: white;
+      text-decoration: none;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn:hover {
+      background: ${success ? '#22c55e' : '#475569'};
+    }
   </style>
 </head>
 <body>
@@ -117,7 +145,12 @@ function renderAuthResultHtml(options: { success: boolean; message: string; erro
     <div class="badge">${success ? '✓' : '✕'}</div>
     <h2>${success ? 'WhatsApp Connected!' : 'Connection Incomplete'}</h2>
     <p>${message}</p>
-    <p style="font-size: 12px; color: #64748b;">This window will close automatically...</p>
+    ${
+      error
+        ? `<div class="error-box"><strong>Details:</strong> ${error}</div>`
+        : ''
+    }
+    <button onclick="window.close()" class="btn">Close This Window</button>
   </div>
   <script>
     try {
@@ -127,14 +160,12 @@ function renderAuthResultHtml(options: { success: boolean; message: string; erro
           connected: ${success},
           error: ${JSON.stringify(error || null)}
         }, '*');
-        setTimeout(() => window.close(), 1500);
-      } else {
-        setTimeout(() => {
-          window.location.href = '${redirectUrl}';
-        }, 1500);
+        if (${success}) {
+          setTimeout(() => window.close(), 1500);
+        }
       }
     } catch (e) {
-      window.location.href = '${redirectUrl}';
+      console.warn('Opener postMessage error:', e);
     }
   </script>
 </body>

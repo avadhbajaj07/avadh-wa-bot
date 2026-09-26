@@ -9,6 +9,7 @@ import {
   X,
   CheckCircle2,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -32,6 +33,7 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
   const [confirmedOtp, setConfirmedOtp] = useState(true);
   const [isLaunching, setIsLaunching] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [serverSecretConfigured, setServerSecretConfigured] = useState<boolean | null>(null);
 
   // Embedded Signup Meta Config
   const appId = process.env.NEXT_PUBLIC_META_APP_ID || '1543169234022851';
@@ -44,7 +46,20 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
   const sessionDataRef = useRef<{ waba_id?: string; phone_number_id?: string }>({});
   const isHandlingCodeRef = useRef(false);
 
-  // Load and initialize Facebook JavaScript SDK
+  // Check server configuration status on modal open
+  useEffect(() => {
+    if (!open) return;
+    fetch('/api/whatsapp/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (typeof data.meta_app_secret_configured === 'boolean') {
+          setServerSecretConfigured(data.meta_app_secret_configured);
+        }
+      })
+      .catch(() => {});
+  }, [open]);
+
+  // Load and initialize Facebook JavaScript SDK if not already done by layout
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -95,7 +110,11 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
         // Event from Meta Embedded Signup popup
         if (payload.type === 'WA_EMBEDDED_SIGNUP') {
           console.log('[Embedded Signup Message Event]:', payload);
-          if (payload.event === 'FINISH') {
+          if (
+            payload.event === 'FINISH' ||
+            payload.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING' ||
+            payload.event === 'FINISH_ONLY_WABA'
+          ) {
             const { phone_number_id, waba_id } = payload.data || {};
             sessionDataRef.current = {
               phone_number_id: phone_number_id || sessionDataRef.current.phone_number_id,
@@ -173,7 +192,7 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
     }
   };
 
-  const handleContinueWithFacebook = () => {
+  const handleContinueWithFacebook = async () => {
     if (!confirmedOtp) {
       toast.error('Please confirm you can receive an OTP on your WhatsApp number.');
       return;
@@ -191,10 +210,22 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
       extrasPayload.featureType = 'whatsapp_business_app_onboarding';
     }
 
+    // Wait up to 1.5s for window.FB to be initialized if it's currently loading
+    let fb = typeof window !== 'undefined' ? window.FB : null;
+    if (!fb) {
+      for (let i = 0; i < 15; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        if (typeof window !== 'undefined' && window.FB) {
+          fb = window.FB;
+          break;
+        }
+      }
+    }
+
     // Official Meta Flow: Facebook JavaScript SDK FB.login
-    if (typeof window !== 'undefined' && window.FB) {
+    if (fb) {
       console.log('[Embedded Signup] Launching via FB.login...');
-      window.FB.login(
+      fb.login(
         (response: any) => {
           console.log('[FB.login response]:', response);
           if (response.authResponse?.code) {
@@ -255,6 +286,30 @@ export function ConnectWhatsAppModal({ open, onClose, onSuccess }: ConnectWhatsA
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Server Setup Notice if META_APP_SECRET is not configured */}
+        {serverSecretConfigured === false && (
+          <div className="my-4 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs">
+            <div className="flex items-center gap-2 font-bold mb-1.5 text-amber-800">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Vercel Configuration Notice: META_APP_SECRET is not configured</span>
+            </div>
+            <p className="text-amber-800 leading-relaxed mb-2">
+              Meta requires your <strong>App Secret</strong> on the server to finish linking WhatsApp. Please copy it from:
+            </p>
+            <a
+              href="https://developers.facebook.com/apps/1543169234022851/settings/basic/"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-semibold text-indigo-700 underline hover:text-indigo-900"
+            >
+              Meta App Dashboard &gt; Settings &gt; Basic &gt; App Secret ↗
+            </a>
+            <p className="text-amber-700 mt-2">
+              Add it in your <strong>Vercel Project Settings &gt; Environment Variables</strong> as <code>META_APP_SECRET</code>, then redeploy.
+            </p>
+          </div>
+        )}
 
         {/* 3 Scenario Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 my-6">
