@@ -20,6 +20,10 @@ const META_APP_SECRET = (
 )
   .split(',')[0]
   .trim();
+const META_SYSTEM_USER_TOKEN = (
+  process.env.META_SYSTEM_USER_TOKEN ||
+  'EAAV7gRYFscMBSqttTiiMVCWtiZAaJbVv0ZCUanNrO0CYgF2mzLud2HxZAtsY3AbqZAXDSxe9noZCVZB1DYWT5LIsfg7HZAVmVvlflrKO1QB1rgqr7nhARP7cyUQtjhDp33RpMjmeIF6PPpLQifZCq8UKcBWHaZCCTwjm2IZAemh7nAJfmXZCsRKvh0GUexcmIxEJwZDZD'
+).trim();
 const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || 'https://www.shikhabajaj.online').replace(/\/$/, '');
 const REDIRECT_URI = `${SITE_URL}/api/whatsapp/oauth/callback`;
 
@@ -414,8 +418,8 @@ async function completeOAuthOnboarding(params: {
       return { success: false, error: exchangeRes.error };
     }
     accessToken = exchangeRes.accessToken;
-  } else if (process.env.META_SYSTEM_USER_TOKEN) {
-    accessToken = process.env.META_SYSTEM_USER_TOKEN.trim();
+  } else if (META_SYSTEM_USER_TOKEN) {
+    accessToken = META_SYSTEM_USER_TOKEN;
   } else {
     return {
       success: false,
