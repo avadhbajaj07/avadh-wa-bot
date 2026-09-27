@@ -21,8 +21,15 @@ export function googleSettings() {
   return { clientId, clientSecret, redirectUri: `${appUrl.replace(/\/$/, '')}/api/google/callback`, key }
 }
 
-export function adminDb(): SupabaseClient {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } })
+export function adminDb(fallbackClient?: SupabaseClient): SupabaseClient {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (serviceKey && serviceKey.trim().length > 0) {
+    return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, { auth: { persistSession: false } })
+  }
+  if (fallbackClient) {
+    return fallbackClient
+  }
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { auth: { persistSession: false } })
 }
 
 export function encryptGoogleSecret(value: string): string {

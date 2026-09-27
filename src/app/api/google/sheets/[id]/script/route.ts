@@ -4,9 +4,9 @@ import { adminDb, decryptGoogleSecret } from '@/lib/google/sheets'
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId, supabase } = await requireRole('admin')
     const { id } = await params
-    const { data: sheet } = await adminDb().from('sheet_configs').select('id,tab_name,sheet_type,webhook_secret_encrypted').eq('id', id).eq('account_id', accountId).maybeSingle()
+    const { data: sheet } = await adminDb(supabase).from('sheet_configs').select('id,tab_name,sheet_type,webhook_secret_encrypted').eq('id', id).eq('account_id', accountId).maybeSingle()
     if (!sheet || sheet.sheet_type === 'failed') return NextResponse.json({ error: 'Sheet not found' }, { status: 404 })
     const endpoint = `${new URL(request.url).origin}/api/webhooks/sheets/${accountId}/${sheet.id}`
     const secret = decryptGoogleSecret(sheet.webhook_secret_encrypted)

@@ -1,7 +1,6 @@
 -- Google credentials and sheet webhook secrets are encrypted by the server.
--- These tables have RLS enabled with no user policies: only the service role
--- can read them, and the API enforces account admin/owner access.
-CREATE TABLE google_connections (
+-- Authenticated admins and service role can access these records for their accounts.
+CREATE TABLE IF NOT EXISTS google_connections (
   account_id uuid PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
   tenant_id uuid GENERATED ALWAYS AS (account_id) STORED,
   refresh_token_encrypted text NOT NULL,
@@ -11,7 +10,13 @@ CREATE TABLE google_connections (
 );
 ALTER TABLE google_connections ENABLE ROW LEVEL SECURITY;
 
-CREATE TABLE sheet_configs (
+DROP POLICY IF EXISTS google_connections_all ON google_connections;
+CREATE POLICY google_connections_all ON google_connections
+  FOR ALL
+  USING (is_account_member(account_id, 'admin'))
+  WITH CHECK (is_account_member(account_id, 'admin'));
+
+CREATE TABLE IF NOT EXISTS sheet_configs (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   tenant_id uuid GENERATED ALWAYS AS (account_id) STORED,
@@ -24,12 +29,18 @@ CREATE TABLE sheet_configs (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (account_id, google_sheet_id, tab_name)
 );
-CREATE UNIQUE INDEX sheet_configs_one_auto_type ON sheet_configs(account_id, sheet_type)
+CREATE UNIQUE INDEX IF NOT EXISTS sheet_configs_one_auto_type ON sheet_configs(account_id, sheet_type)
   WHERE sheet_type IN ('leads', 'bulk', 'failed');
-CREATE INDEX sheet_configs_account_active ON sheet_configs(account_id, active);
+CREATE INDEX IF NOT EXISTS sheet_configs_account_active ON sheet_configs(account_id, active);
 ALTER TABLE sheet_configs ENABLE ROW LEVEL SECURITY;
 
-CREATE TABLE sheet_message_log (
+DROP POLICY IF EXISTS sheet_configs_all ON sheet_configs;
+CREATE POLICY sheet_configs_all ON sheet_configs
+  FOR ALL
+  USING (is_account_member(account_id, 'admin'))
+  WITH CHECK (is_account_member(account_id, 'admin'));
+
+CREATE TABLE IF NOT EXISTS sheet_message_log (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   tenant_id uuid GENERATED ALWAYS AS (account_id) STORED,
@@ -47,10 +58,16 @@ CREATE TABLE sheet_message_log (
   replied_at timestamptz,
   UNIQUE (sheet_config_id, row_number)
 );
-CREATE INDEX sheet_message_log_reply_lookup ON sheet_message_log(account_id, phone, sent_at DESC);
+CREATE INDEX IF NOT EXISTS sheet_message_log_reply_lookup ON sheet_message_log(account_id, phone, sent_at DESC);
 ALTER TABLE sheet_message_log ENABLE ROW LEVEL SECURITY;
 
-CREATE TABLE store_order_events (
+DROP POLICY IF EXISTS sheet_message_log_all ON sheet_message_log;
+CREATE POLICY sheet_message_log_all ON sheet_message_log
+  FOR ALL
+  USING (is_account_member(account_id, 'admin'))
+  WITH CHECK (is_account_member(account_id, 'admin'));
+
+CREATE TABLE IF NOT EXISTS store_order_events (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   account_id uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   tenant_id uuid GENERATED ALWAYS AS (account_id) STORED,
@@ -67,6 +84,12 @@ CREATE TABLE store_order_events (
   UNIQUE (account_id, external_order_id)
 );
 ALTER TABLE store_order_events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS store_order_events_all ON store_order_events;
+CREATE POLICY store_order_events_all ON store_order_events
+  FOR ALL
+  USING (is_account_member(account_id, 'admin'))
+  WITH CHECK (is_account_member(account_id, 'admin'));
 
 -- Compatibility views matching exact spec identifiers (tenant_id, whatsapp_templates, message_log)
 CREATE OR REPLACE VIEW whatsapp_templates AS

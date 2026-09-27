@@ -17,12 +17,16 @@ export async function GET(request: NextRequest) {
     const ctx = await requireRole('admin')
     if (ctx.accountId !== state.accountId || ctx.userId !== state.userId) throw new Error('Account mismatch')
     const token = await exchangeCode(code)
-    const db = adminDb()
+    const db = adminDb(ctx.supabase)
     const { error } = await db.from('google_connections').upsert({ account_id: ctx.accountId, refresh_token_encrypted: encryptGoogleSecret(token), connected_at: new Date().toISOString() }, { onConflict: 'account_id' })
-    if (error) throw new Error('Could not save Google connection')
+    if (error) {
+      console.error('Failed to save google_connections:', error)
+      throw new Error('Could not save Google connection')
+    }
     await provisionSheets(db, ctx.accountId, ctx.account.name)
     destination.searchParams.set('google_connected', '1')
-  } catch {
+  } catch (error) {
+    console.error('Google OAuth callback setup error:', error)
     destination.searchParams.set('google_error', 'setup_failed')
   }
   return response()

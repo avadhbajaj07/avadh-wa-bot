@@ -5,24 +5,27 @@ import { accessToken, adminDb, encryptGoogleSecret, googleApi, randomSecret, rea
 export async function GET() {
   try {
     const { accountId, supabase } = await requireRole('admin')
-    const db = adminDb()
+    const db = adminDb(supabase)
     const [{ data: connection }, { data: sheets, error }, { data: templates }] = await Promise.all([
       db.from('google_connections').select('connected_at').eq('account_id', accountId).maybeSingle(),
       db.from('sheet_configs').select('id,sheet_type,google_sheet_id,tab_name,template_id,active').eq('account_id', accountId).order('created_at'),
       supabase.from('message_templates').select('id,name,language,status').eq('account_id', accountId).eq('status', 'Approved').order('name'),
     ])
-    if (error) throw new Error('Could not load sheet settings')
+    if (error) {
+      console.error('Failed to load sheet settings from DB:', error)
+      throw new Error('Could not load sheet settings')
+    }
     return NextResponse.json({ connected: !!connection, sheets: sheets || [], templates: templates || [] })
   } catch (error) { return toErrorResponse(error) }
 }
 
 export async function POST(request: Request) {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId, supabase } = await requireRole('admin')
     const body = await request.json() as { googleSheetId?: string; tabName?: string }
     const id = body.googleSheetId?.trim()
     if (!id || !/^[\w-]{15,100}$/.test(id)) return NextResponse.json({ error: 'Invalid sheet ID' }, { status: 400 })
-    const db = adminDb()
+    const db = adminDb(supabase)
     const token = await accessToken(db, accountId)
     const spreadsheet = await googleApi<{ sheets?: { properties?: { title?: string } }[] }>(token, `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(id)}?fields=sheets.properties.title`)
     const tab = body.tabName?.trim() || spreadsheet.sheets?.[0]?.properties?.title || 'Sheet1'
@@ -37,10 +40,10 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId, supabase } = await requireRole('admin')
     const body = await request.json() as { id?: string; active?: boolean; templateId?: string | null }
     if (!body.id || (body.active === undefined && body.templateId === undefined)) return NextResponse.json({ error: 'Invalid update' }, { status: 400 })
-    const db = adminDb()
+    const db = adminDb(supabase)
     const { data: config } = await db.from('sheet_configs').select('id,sheet_type').eq('id', body.id).eq('account_id', accountId).maybeSingle()
     if (!config) return NextResponse.json({ error: 'Sheet not found' }, { status: 404 })
     const update: Record<string, unknown> = {}
