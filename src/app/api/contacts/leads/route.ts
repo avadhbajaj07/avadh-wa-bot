@@ -67,7 +67,7 @@ export async function GET(request: Request) {
     // 3. Query customer messages matching register or session
     // Batch in chunks if large to prevent statement size limits
     const CHUNK_SIZE = 200;
-    let allMatchingMessages: Array<{
+    const allMatchingMessages: Array<{
       conversation_id: string;
       content_text: string | null;
       interactive_reply_id: string | null;

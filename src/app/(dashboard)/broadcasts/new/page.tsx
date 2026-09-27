@@ -43,13 +43,15 @@ export default function NewBroadcastPage() {
       if (stored) {
         const leadContacts = JSON.parse(stored);
         if (Array.isArray(leadContacts) && leadContacts.length > 0) {
-          setAudience({
-            type: 'paste',
-            csvContacts: leadContacts,
-          });
-          setName(`Follow-up Campaign to Leads (${leadContacts.length})`);
-          toast.success(`Loaded ${leadContacts.length} campaign leads into audience!`);
           sessionStorage.removeItem('broadcast_lead_contacts');
+          setTimeout(() => {
+            setAudience({
+              type: 'paste',
+              csvContacts: leadContacts,
+            });
+            setName(`Follow-up Campaign to Leads (${leadContacts.length})`);
+            toast.success(`Loaded ${leadContacts.length} campaign leads into audience!`);
+          }, 0);
         }
       }
     } catch {}

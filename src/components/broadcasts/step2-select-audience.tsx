@@ -99,10 +99,11 @@ export function Step2SelectAudience({
   const csvCount = audience.csvContacts?.length ?? 0;
   const csvFileName = csvCount > 0 ? pickedCsvName : null;
 
+  const templateBodyText = template?.body_text;
   const templatePlaceholders = useMemo(() => {
-    if (!template?.body_text) return [];
-    return extractTemplatePlaceholders(template.body_text);
-  }, [template?.body_text]);
+    if (!templateBodyText) return [];
+    return extractTemplatePlaceholders(templateBodyText);
+  }, [templateBodyText]);
 
   const displayHeaders = useMemo(() => {
     if (audience.csvColumns && audience.csvColumns.length > 0) {
