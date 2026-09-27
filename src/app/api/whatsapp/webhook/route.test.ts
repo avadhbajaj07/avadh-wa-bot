@@ -278,6 +278,10 @@ vi.mock('@/lib/ai/auto-reply', () => ({
 vi.mock('@/lib/webhooks/deliver', () => ({
   dispatchWebhookEvent: h.dispatchWebhookEvent,
 }))
+vi.mock('@/lib/google/sync', () => ({
+  syncInboundReply: vi.fn(async () => {}),
+  syncDeliveryFailure: vi.fn(async () => {}),
+}))
 
 import { POST } from './route'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'

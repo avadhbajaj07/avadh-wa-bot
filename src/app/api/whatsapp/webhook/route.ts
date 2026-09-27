@@ -28,6 +28,7 @@ import {
 import { recordOutboundBroadcastMessage } from '@/lib/whatsapp/broadcast-conversation-sync'
 import { resolveTemplateRow } from '@/lib/whatsapp/template-body'
 import { resolveConversationByPhone } from '@/lib/whatsapp/resolve-conversation'
+import { syncInboundReply, syncDeliveryFailure } from '@/lib/google/sync'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -598,6 +599,20 @@ async function handleStatusUpdate(status: {
     )
   }
 
+  if (failure) {
+    try {
+      await syncDeliveryFailure(
+        supabaseAdmin(),
+        status.id,
+        String(failure.code),
+        failure.details || failure.title,
+        new Date(Number(status.timestamp) * 1000).toISOString(),
+      )
+    } catch {
+      console.error('[sheets] Failed to sync delivery failure')
+    }
+  }
+
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
   //    already match the CHECK constraint on messages.status. No
   //    `.select()`: message_id is NOT unique (migration 009 — Meta ids
@@ -1038,6 +1053,20 @@ async function processMessage(
       message.id
     )
     return
+  }
+
+  if (message.from) {
+    try {
+      await syncInboundReply(
+        supabaseAdmin(),
+        accountId,
+        message.from,
+        contentText || message.button?.text || '',
+        new Date(Number(message.timestamp) * 1000).toISOString(),
+      )
+    } catch {
+      console.error('[sheets] Failed to sync inbound reply')
+    }
   }
 
   // Update conversation. The unread bump is done DB-side (migration 037's
