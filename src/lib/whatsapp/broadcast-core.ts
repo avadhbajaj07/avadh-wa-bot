@@ -32,6 +32,11 @@ import { findOrCreateContact } from '@/lib/api/v1/contacts';
 import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 
 import { recordOutboundBroadcastMessage } from '@/lib/whatsapp/broadcast-conversation-sync';
+import {
+  deductWalletBalance,
+  refundWalletBalance,
+  estimateMessageCost,
+} from '@/lib/wallet/wallet';
 
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
 export class BroadcastError extends Error {
@@ -204,6 +209,29 @@ export async function createBroadcast(
   // an orphaned campaign that looked like it was sending but had no
   // delivery plan (issue #370). The function body is atomic, so a recipient
   // failure now rolls the parent back and nothing orphaned survives.
+  // Wallet balance check and escrow for the campaign
+  const messageRate = estimateMessageCost(templateRow?.category || 'MARKETING');
+  const totalCost = Math.round(deduped.length * messageRate * 100) / 100;
+  const deduction = await deductWalletBalance(db, {
+    accountId,
+    amount: totalCost,
+    type: 'broadcast_debit',
+    description: `Campaign: ${name || templateName} (${deduped.length} msgs)`,
+    metadata: {
+      templateName,
+      recipientsCount: deduped.length,
+      rate: messageRate,
+    },
+  });
+
+  if (!deduction.success) {
+    throw new BroadcastError(
+      'insufficient_balance',
+      deduction.error || `Insufficient wallet balance. Total cost is ₹${totalCost}. Please recharge your wallet.`,
+      402
+    );
+  }
+
   const { data: createdRows, error: createErr } = await db.rpc(
     'create_broadcast_with_recipients',
     {
@@ -220,6 +248,13 @@ export async function createBroadcast(
     }
   );
   if (createErr || !createdRows || createdRows.length === 0) {
+    if (!deduction.exempt && totalCost > 0) {
+      void refundWalletBalance(db, {
+        accountId,
+        amount: totalCost,
+        description: `Refund: aborted campaign ${name || templateName}`,
+      });
+    }
     console.error('[broadcast-core] create broadcast error:', createErr);
     throw new BroadcastError('internal', 'Failed to create broadcast', 500);
   }
@@ -280,6 +315,7 @@ export async function deliverBroadcast(
   db: SupabaseClient,
   plan: BroadcastPlan
 ): Promise<void> {
+  let failedCount = 0;
   for (let i = 0; i < plan.planned.length; i++) {
     const recipient = plan.planned[i];
     const formatted = formatPhoneNumber(recipient.phone) || recipient.phone;
@@ -365,6 +401,7 @@ export async function deliverBroadcast(
         console.error('[broadcast-core] failed to mirror message to Chats:', mirrorErr);
       }
     } else {
+      failedCount++;
       await db
         .from('broadcast_recipients')
         .update({
@@ -377,6 +414,20 @@ export async function deliverBroadcast(
     // 50ms pacing between recipients to prevent tripping Meta's API burst limits
     if (i < plan.planned.length - 1) {
       await sleep(50);
+    }
+  }
+
+  // Automatic refund for undelivered / failed recipients
+  if (failedCount > 0 && plan.accountId) {
+    const rate = estimateMessageCost(plan.templateRow?.category || 'MARKETING');
+    const refundAmount = Math.round(failedCount * rate * 100) / 100;
+    if (refundAmount > 0) {
+      void refundWalletBalance(db, {
+        accountId: plan.accountId,
+        amount: refundAmount,
+        description: `Refund: ${failedCount} undelivered message(s) from campaign (${plan.templateName})`,
+        referenceId: plan.broadcastId,
+      });
     }
   }
 

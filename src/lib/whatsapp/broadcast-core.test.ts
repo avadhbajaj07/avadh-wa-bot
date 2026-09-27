@@ -95,6 +95,9 @@ function makeDb(rpcResult: { data: unknown; error: unknown }) {
       throw new Error(`unexpected table: ${table}`);
     },
     rpc(name: string, args: unknown) {
+      if (name === 'deduct_wallet_balance' || name === 'credit_wallet_balance') {
+        return Promise.resolve({ data: { success: true, balance: 1000 }, error: null });
+      }
       calls.rpc.push({ name, args });
       return Promise.resolve(rpcResult);
     },

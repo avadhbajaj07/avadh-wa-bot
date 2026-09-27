@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ModeToggle } from "@/components/layout/mode-toggle";
+import { WalletBadge } from "@/components/wallet/wallet-badge";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "dashboard",
@@ -77,7 +78,8 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         </h1>
       </div>
 
-      <div className="flex items-center gap-1 sm:gap-2">
+      <div className="flex items-center gap-2 sm:gap-3">
+        <WalletBadge />
         <ModeToggle />
 
         <DropdownMenu>

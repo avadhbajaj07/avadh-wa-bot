@@ -177,6 +177,11 @@ export function SettingsOverview({
       ),
     },
     {
+      section: 'wallet',
+      loading: false,
+      subtitle: 'Prepaid balance & UPI recharge',
+    },
+    {
       section: 'members',
       loading: countsLoading,
       subtitle:

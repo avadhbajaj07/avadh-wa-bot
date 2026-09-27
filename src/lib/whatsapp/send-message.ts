@@ -47,6 +47,11 @@ import {
   templateBodyParams,
   templateContentText,
 } from '@/lib/whatsapp/template-body';
+import {
+  deductWalletBalance,
+  refundWalletBalance,
+  estimateMessageCost,
+} from '@/lib/wallet/wallet';
 
 export const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const;
 export const VALID_MESSAGE_TYPES = [
@@ -339,6 +344,32 @@ export async function sendMessageToConversation(
     sendLanguage = resolved.language;
   }
 
+  // Wallet balance check and real-time per-message deduction
+  const messageCost = estimateMessageCost(templateRow?.category || messageType);
+  const deduction = await deductWalletBalance(db, {
+    accountId,
+    amount: messageCost,
+    type: 'message_debit',
+    description:
+      messageType === 'template'
+        ? `Template: ${templateName} (${templateRow?.category || 'UTILITY'})`
+        : `Message (${messageType})`,
+    metadata: {
+      conversationId,
+      messageType,
+      templateName,
+      category: templateRow?.category,
+    },
+  });
+
+  if (!deduction.success) {
+    throw new SendMessageError(
+      'insufficient_balance',
+      deduction.error || 'Insufficient wallet balance. Please recharge your wallet.',
+      402
+    );
+  }
+
   const attempt = async (phone: string): Promise<string> => {
     if (messageType === 'template') {
       const result = await sendTemplateMessage({
@@ -436,6 +467,14 @@ export async function sendMessageToConversation(
 
     if (lastError) throw lastError;
   } catch (err) {
+    if (!deduction.exempt && messageCost > 0 && !waMessageId) {
+      void refundWalletBalance(db, {
+        accountId,
+        amount: messageCost,
+        description: `Refund: failed message to ${sendTarget}`,
+        metadata: { error: err instanceof Error ? err.message : String(err) },
+      });
+    }
     const message =
       err instanceof Error ? err.message : 'Unknown Meta API error';
     console.error('[send-message] Meta send failed for all variants:', message);
