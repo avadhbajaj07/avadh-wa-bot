@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { getWallet } from '@/lib/wallet/wallet'
+import { isStripeConfigured } from '@/lib/stripe/stripe'
 
 export async function GET() {
   try {
@@ -26,6 +27,7 @@ export async function GET() {
     return NextResponse.json({
       ...wallet,
       role,
+      stripeConfigured: isStripeConfigured(),
       transactions: transactions || [],
       pendingTopups: pendingTopups || [],
     })

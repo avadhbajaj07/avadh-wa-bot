@@ -7,6 +7,7 @@ import {
   Check,
   Copy,
   CreditCard,
+  Globe,
   Loader2,
   QrCode,
   ShieldCheck,
@@ -32,7 +33,7 @@ interface RechargeModalProps {
   onSuccess?: () => void
 }
 
-const PRESET_AMOUNTS = [200, 500, 1000, 2500]
+const PRESET_AMOUNTS = [500, 1000, 2500, 5000]
 
 export function RechargeModal({
   open,
@@ -41,6 +42,7 @@ export function RechargeModal({
   upiName = 'SandeshAI',
   onSuccess,
 }: RechargeModalProps) {
+  const [method, setMethod] = useState<'stripe' | 'upi'>('stripe')
   const [amount, setAmount] = useState<number>(500)
   const [customAmount, setCustomAmount] = useState<string>('500')
   const [qrDataUrl, setQrDataUrl] = useState<string>('')
@@ -48,6 +50,7 @@ export function RechargeModal({
   const [notes, setNotes] = useState<string>('')
   const [copiedUpi, setCopiedUpi] = useState<boolean>(false)
   const [submitting, setSubmitting] = useState<boolean>(false)
+  const [redirectingStripe, setRedirectingStripe] = useState<boolean>(false)
   const [step, setStep] = useState<'pay' | 'utr' | 'success'>('pay')
 
   // Generate UPI URI
@@ -60,20 +63,23 @@ export function RechargeModal({
       setStep('pay')
       setUtrNumber('')
       setNotes('')
+      setRedirectingStripe(false)
       return
     }
 
-    QRCode.toDataURL(upiUrl, {
-      width: 260,
-      margin: 1,
-      color: {
-        dark: '#000000',
-        light: '#FFFFFF',
-      },
-    })
-      .then((url) => setQrDataUrl(url))
-      .catch((err) => console.error('Failed to generate QR code:', err))
-  }, [open, upiUrl])
+    if (method === 'upi') {
+      QRCode.toDataURL(upiUrl, {
+        width: 260,
+        margin: 1,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF',
+        },
+      })
+        .then((url) => setQrDataUrl(url))
+        .catch((err) => console.error('Failed to generate QR code:', err))
+    }
+  }, [open, upiUrl, method])
 
   function handleSelectPreset(preset: number) {
     setAmount(preset)
@@ -94,6 +100,36 @@ export function RechargeModal({
       toast.success('UPI ID copied to clipboard')
       setTimeout(() => setCopiedUpi(false), 2000)
     })
+  }
+
+  async function handleStripeCheckout() {
+    if (amount < 50) {
+      toast.error('Minimum recharge amount is ₹50')
+      return
+    }
+
+    setRedirectingStripe(true)
+    try {
+      const res = await fetch('/api/wallet/stripe-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to initiate Stripe Checkout')
+      }
+
+      if (data.url) {
+        window.location.href = data.url
+      } else {
+        throw new Error('No checkout URL returned')
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Stripe checkout error')
+      setRedirectingStripe(false)
+    }
   }
 
   async function handleSubmitUtr(e: React.FormEvent) {
@@ -133,19 +169,53 @@ export function RechargeModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[440px]">
+      <DialogContent className="sm:max-w-[460px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5 text-primary" />
             Recharge Message Wallet
           </DialogTitle>
           <DialogDescription>
-            Pay using any UPI app (GPay, PhonePe, Paytm, BHIM). Messages are deducted from this
-            balance.
+            Add prepaid credits to your account. Anyone worldwide can pay securely via Stripe, or via UPI in India.
           </DialogDescription>
         </DialogHeader>
 
-        {step === 'pay' && (
+        {/* Method selector toggle */}
+        <div className="grid grid-cols-2 gap-2 rounded-lg border bg-muted/40 p-1 text-xs">
+          <button
+            type="button"
+            onClick={() => {
+              setMethod('stripe')
+              setStep('pay')
+            }}
+            className={`flex items-center justify-center gap-1.5 rounded-md py-2 font-medium transition-all ${
+              method === 'stripe'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Globe className="h-4 w-4 text-primary" />
+            <span>Card / Global (Stripe)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMethod('upi')
+              setStep('pay')
+            }}
+            className={`flex items-center justify-center gap-1.5 rounded-md py-2 font-medium transition-all ${
+              method === 'upi'
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <QrCode className="h-4 w-4 text-emerald-500" />
+            <span>UPI / QR (India)</span>
+          </button>
+        </div>
+
+        {/* STRIPE FLOW */}
+        {method === 'stripe' && (
           <div className="space-y-4 pt-2">
             <div>
               <Label className="text-xs text-muted-foreground">Select Amount (INR ₹)</Label>
@@ -159,7 +229,76 @@ export function RechargeModal({
                     className="font-medium"
                     onClick={() => handleSelectPreset(preset)}
                   >
-                    ₹{preset}
+                    ₹{preset.toLocaleString('en-IN')}
+                  </Button>
+                ))}
+              </div>
+              <div className="mt-2.5">
+                <Input
+                  type="number"
+                  placeholder="Or enter custom amount (min ₹50)"
+                  value={customAmount}
+                  onChange={(e) => handleCustomAmountChange(e.target.value)}
+                  min="50"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-xl border bg-muted/30 p-4 space-y-2.5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <CreditCard className="h-5 w-5" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-foreground">Worldwide Cards & Wallets</p>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Supports <strong>Visa, Mastercard, American Express, Apple Pay, and Google Pay</strong>. International customers are charged in their local currency at the bank exchange rate.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between border-t border-border/60 pt-2 text-xs">
+                <span className="text-muted-foreground">Recharge credits:</span>
+                <span className="font-bold text-foreground">₹{amount.toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              className="w-full h-10 font-semibold"
+              disabled={redirectingStripe || amount < 50}
+              onClick={handleStripeCheckout}
+            >
+              {redirectingStripe ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Connecting to Stripe...
+                </>
+              ) : (
+                <>
+                  Pay ₹{amount.toLocaleString('en-IN')} with Stripe →
+                </>
+              )}
+            </Button>
+          </div>
+        )}
+
+        {/* UPI FLOW */}
+        {method === 'upi' && step === 'pay' && (
+          <div className="space-y-4 pt-2">
+            <div>
+              <Label className="text-xs text-muted-foreground">Select Amount (INR ₹)</Label>
+              <div className="mt-2 grid grid-cols-4 gap-2">
+                {PRESET_AMOUNTS.map((preset) => (
+                  <Button
+                    key={preset}
+                    type="button"
+                    variant={amount === preset ? 'default' : 'outline'}
+                    size="sm"
+                    className="font-medium"
+                    onClick={() => handleSelectPreset(preset)}
+                  >
+                    ₹{preset.toLocaleString('en-IN')}
                   </Button>
                 ))}
               </div>
@@ -189,7 +328,7 @@ export function RechargeModal({
               )}
 
               <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                <QrCode className="h-3.5 w-3.5 text-primary" />
+                <QrCode className="h-3.5 w-3.5 text-emerald-500" />
                 <span>Scan with Google Pay, PhonePe, Paytm, or BHIM</span>
               </div>
             </div>
@@ -234,7 +373,7 @@ export function RechargeModal({
           </div>
         )}
 
-        {step === 'utr' && (
+        {method === 'upi' && step === 'utr' && (
           <form onSubmit={handleSubmitUtr} className="space-y-4 pt-2">
             <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
               You are submitting verification for{' '}
@@ -296,7 +435,7 @@ export function RechargeModal({
           </form>
         )}
 
-        {step === 'success' && (
+        {method === 'upi' && step === 'success' && (
           <div className="flex flex-col items-center py-6 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
               <ShieldCheck className="h-7 w-7" />

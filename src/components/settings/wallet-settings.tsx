@@ -67,6 +67,41 @@ export function WalletSettings() {
 
   useEffect(() => {
     void fetchWalletData()
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const sessionId = params.get('stripe_session_id')
+      const cancelled = params.get('stripe_cancel')
+
+      if (cancelled === 'true') {
+        toast.info('Stripe payment was cancelled.')
+        window.history.replaceState({}, '', window.location.pathname)
+        return
+      }
+
+      if (sessionId) {
+        toast.loading('Verifying your Stripe payment...', { id: 'stripe-verify' })
+        fetch(`/api/wallet/stripe-verify?session_id=${encodeURIComponent(sessionId)}`)
+          .then((res) => res.json())
+          .then((result) => {
+            if (result.paid) {
+              toast.success(
+                `Payment verified! ₹${result.amount} has been added to your wallet.`,
+                { id: 'stripe-verify' }
+              )
+              void fetchWalletData()
+            } else {
+              toast.error(result.message || 'Payment not yet verified', { id: 'stripe-verify' })
+            }
+          })
+          .catch(() => {
+            toast.error('Could not verify Stripe payment', { id: 'stripe-verify' })
+          })
+          .finally(() => {
+            window.history.replaceState({}, '', window.location.pathname)
+          })
+      }
+    }
   }, [fetchWalletData])
 
   async function handleApproveTopup(requestId: string, action: 'approve' | 'reject') {
