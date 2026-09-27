@@ -69,7 +69,11 @@ export async function exchangeCode(code: string): Promise<string> {
     body: new URLSearchParams({ code, client_id: cfg.clientId, client_secret: cfg.clientSecret, redirect_uri: cfg.redirectUri, grant_type: 'authorization_code' }),
     cache: 'no-store',
   })
-  if (!response.ok) throw new Error('Google token exchange failed')
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '')
+    console.error('Google token exchange failed:', response.status, errorText)
+    throw new Error(`Google token exchange failed (${response.status}): ${errorText}`)
+  }
   const data = await response.json() as { refresh_token?: string }
   if (!data.refresh_token) throw new Error('Google did not return a refresh token; reconnect with consent')
   return data.refresh_token
@@ -97,7 +101,11 @@ export async function googleApi<T>(token: string, url: string, method = 'GET', b
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: 'no-store',
   })
-  if (!response.ok) throw new Error(`Google API request failed (${response.status})`)
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '')
+    console.error(`Google API request failed (${response.status}):`, errorText)
+    throw new Error(`Google API request failed (${response.status}): ${errorText}`)
+  }
   return response.status === 204 ? undefined as T : await response.json() as T
 }
 

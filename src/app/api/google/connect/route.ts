@@ -11,7 +11,7 @@ export async function GET() {
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
     url.search = new URLSearchParams({ client_id: cfg.clientId, redirect_uri: cfg.redirectUri, response_type: 'code', scope: GOOGLE_SCOPES, access_type: 'offline', prompt: 'consent', state: signState(payload) }).toString()
     const response = NextResponse.redirect(url)
-    response.cookies.set('google_oauth_nonce', nonce, { httpOnly: true, secure: cfg.redirectUri.startsWith('https:'), sameSite: 'lax', maxAge: 600, path: '/api/google/callback' })
+    response.cookies.set('google_oauth_nonce', nonce, { httpOnly: true, secure: cfg.redirectUri.startsWith('https:'), sameSite: 'lax', maxAge: 600, path: '/' })
     return response
   } catch (error) { return toErrorResponse(error) }
 }

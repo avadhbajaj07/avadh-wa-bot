@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   AlertCircle,
@@ -97,6 +98,10 @@ function loadPicker(): Promise<void> {
 }
 
 export function GoogleSheetsSettings() {
+  const searchParams = useSearchParams()
+  const googleConnected = searchParams.get('google_connected')
+  const googleError = searchParams.get('google_error')
+
   const [state, setState] = useState<SheetState | null>(null)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -124,6 +129,12 @@ export function GoogleSheetsSettings() {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  useEffect(() => {
+    if (googleConnected === '1') {
+      toast.success('Google Workspace & Drive connected successfully!')
+    }
+  }, [googleConnected])
 
   async function updateSheet(
     sheet: Sheet,
@@ -286,13 +297,18 @@ export function GoogleSheetsSettings() {
         }
       />
 
-      {error && (
+      {(error || googleError) && (
         <div
           role="alert"
           className="flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive"
         >
           <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{error}</span>
+          <span>
+            {error ||
+              (googleError === 'setup_failed'
+                ? 'Google connection setup failed. Please make sure Google Drive API and Google Sheets API are enabled in Google Cloud Console.'
+                : decodeURIComponent(googleError || ''))}
+          </span>
         </div>
       )}
 
