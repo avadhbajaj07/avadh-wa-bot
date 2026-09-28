@@ -33,6 +33,7 @@ import { useTranslations } from 'next-intl'
 import { useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { WhatsAppSetupGuide } from '@/components/dashboard/whatsapp-setup-guide'
+import { MetaExpenseCard } from '@/components/dashboard/meta-expense-card'
 
 type RangeDays = 7 | 30 | 90
 
@@ -99,7 +100,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadAll()
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     checkWaConnection()
     const connected = searchParams.get('connected')
     const oauthError = searchParams.get('oauth_error')
@@ -198,6 +198,9 @@ export default function DashboardPage() {
 
       {/* Quick actions */}
       <QuickActions />
+
+      {/* Meta API Expenses & Account Health */}
+      <MetaExpenseCard />
 
       {/* Charts row */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">

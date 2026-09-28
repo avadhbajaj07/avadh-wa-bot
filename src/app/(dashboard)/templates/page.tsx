@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -8,21 +8,14 @@ import {
   Trash2,
   Loader2,
   RefreshCw,
-  FileText,
   Copy,
   Eye,
   BookOpen,
   Sparkles,
-  CheckCircle2,
-  Clock,
-  XCircle,
-  Upload,
   MessageSquare,
-  ExternalLink,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
-import { useCan } from '@/hooks/use-can';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -103,8 +96,7 @@ const TEMPLATE_PRESETS: BrowsePreset[] = [
 
 export default function TemplatesPage() {
   const router = useRouter();
-  const { account, accountId } = useAuth();
-  const canManage = useCan('edit-settings');
+  const { accountId } = useAuth();
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -197,19 +189,16 @@ export default function TemplatesPage() {
     return [...set].sort((a, b) => a - b);
   }, [formBodyText]);
 
-  async function fetchTemplates() {
+  const fetchTemplates = useCallback(async () => {
     try {
       const supabase = createClient();
-      let query = supabase
-        .from('message_templates')
-        .select('*');
+      let query = supabase.from('message_templates').select('*');
 
       if (accountId) {
         query = query.eq('account_id', accountId);
       }
 
-      const { data, error } = await query
-        .order('created_at', { ascending: false });
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) throw error;
       setTemplates((data as MessageTemplate[]) || []);
@@ -219,29 +208,58 @@ export default function TemplatesPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [accountId]);
+
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+
+  const handleSyncFromMeta = useCallback(
+    async (silent = false) => {
+      setSyncing(true);
+      try {
+        const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Sync failed');
+        }
+        setLastSyncedAt(new Date());
+        if (!silent) {
+          toast.success(`Successfully synced ${data.count ?? data.synced ?? 0} templates from Meta`);
+        }
+        await fetchTemplates();
+      } catch (err) {
+        if (!silent) {
+          console.error('Meta sync error:', err);
+          toast.error(err instanceof Error ? err.message : 'Failed to sync templates from WhatsApp');
+        }
+      } finally {
+        setSyncing(false);
+      }
+    },
+    [fetchTemplates]
+  );
 
   useEffect(() => {
     fetchTemplates();
-  }, [accountId]);
-
-  async function handleSyncFromMeta() {
-    setSyncing(true);
-    try {
-      const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Sync failed');
-      }
-      toast.success(`Successfully synced ${data.count ?? data.synced ?? 0} templates from Meta`);
-      await fetchTemplates();
-    } catch (err) {
-      console.error('Meta sync error:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to sync templates from WhatsApp');
-    } finally {
-      setSyncing(false);
+    if (accountId) {
+      void handleSyncFromMeta(true);
     }
-  }
+  }, [accountId, fetchTemplates, handleSyncFromMeta]);
+
+  // Smart polling: if any template is pending approval, auto-poll Meta every 20s
+  useEffect(() => {
+    const hasPending = templates.some(
+      (t) =>
+        (t.status || '').toUpperCase() === 'PENDING' ||
+        (t.status || '').toUpperCase() === 'SUBMITTED'
+    );
+    if (!hasPending) return;
+
+    const timer = setInterval(() => {
+      void handleSyncFromMeta(true);
+    }, 20_000);
+
+    return () => clearInterval(timer);
+  }, [templates, handleSyncFromMeta]);
 
   function handleOpenCreate(preset?: BrowsePreset) {
     if (preset) {
@@ -326,6 +344,27 @@ export default function TemplatesPage() {
       sample_values.header = [formHeaderSample.trim() || 'Notice'];
     }
 
+    const validButtons: TemplateButton[] = [];
+    for (const btn of formButtons) {
+      const text = btn.text?.trim();
+      if (!text) continue;
+      if (btn.type === 'URL') {
+        if (!btn.url || !btn.url.startsWith('http')) {
+          toast.error(`Please enter a valid website URL starting with https:// for button "${text}"`);
+          return;
+        }
+        validButtons.push({ type: 'URL', text, url: btn.url.trim() });
+      } else if (btn.type === 'PHONE_NUMBER') {
+        if (!btn.phone_number || btn.phone_number.length < 6) {
+          toast.error(`Please enter a valid phone number with country code for button "${text}"`);
+          return;
+        }
+        validButtons.push({ type: 'PHONE_NUMBER', text, phone_number: btn.phone_number.trim() });
+      } else {
+        validButtons.push({ type: 'QUICK_REPLY', text });
+      }
+    }
+
     const payload = {
       name: sanitizedName,
       category: formCategory,
@@ -337,7 +376,7 @@ export default function TemplatesPage() {
         : undefined,
       body_text: formBodyText.trim(),
       footer_text: formFooterText.trim() || undefined,
-      buttons: formButtons.length > 0 ? formButtons : undefined,
+      buttons: validButtons.length > 0 ? validButtons : undefined,
       sample_values: Object.keys(sample_values).length > 0 ? sample_values : undefined,
     };
 
@@ -472,16 +511,28 @@ export default function TemplatesPage() {
           })}
         </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleSyncFromMeta}
-          disabled={syncing}
-          className="text-xs text-muted-foreground hover:text-foreground h-8"
-        >
-          <RefreshCw className={`size-3.5 mr-1.5 ${syncing ? 'animate-spin text-primary' : ''}`} />
-          {syncing ? 'Syncing...' : 'Sync'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-emerald-700 dark:text-emerald-400 font-semibold">Auto-Sync Active</span>
+            {lastSyncedAt && (
+              <span className="text-[10px] text-muted-foreground">
+                ({lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+              </span>
+            )}
+          </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleSyncFromMeta(false)}
+            disabled={syncing}
+            className="text-xs text-muted-foreground hover:text-foreground h-8"
+          >
+            <RefreshCw className={`size-3.5 mr-1.5 ${syncing ? 'animate-spin text-primary' : ''}`} />
+            {syncing ? 'Syncing...' : 'Sync Now'}
+          </Button>
+        </div>
       </div>
 
       {/* Main Content Area */}
@@ -839,6 +890,186 @@ export default function TemplatesPage() {
                 placeholder="e.g. Reply STOP to opt out"
                 className="mt-1 text-xs"
               />
+            </div>
+
+            {/* Interactive Buttons Builder */}
+            <div className="space-y-3 pt-2 border-t border-border/70">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-xs font-semibold">Interactive Buttons (Optional)</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Add quick reply chips or call-to-action buttons (Website URL or Phone call).
+                  </p>
+                </div>
+                {formButtons.length < 3 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs border-primary/30 text-primary hover:bg-primary/10"
+                    onClick={() => {
+                      setFormButtons((prev) => [
+                        ...prev,
+                        { type: 'QUICK_REPLY', text: '' },
+                      ])
+                    }}
+                  >
+                    <Plus className="size-3 mr-1" />
+                    + Add Button
+                  </Button>
+                )}
+              </div>
+
+              {formButtons.length > 0 && (
+                <div className="space-y-2">
+                  {formButtons.map((btn, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-xl border border-border/80 bg-muted/30 p-3 space-y-2 text-xs"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-muted-foreground text-[11px]">
+                          Button #{idx + 1}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10"
+                          onClick={() => {
+                            setFormButtons((prev) => prev.filter((_, i) => i !== idx))
+                          }}
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Button Type</Label>
+                          <Select
+                            value={btn.type}
+                            onValueChange={(val) => {
+                              setFormButtons((prev) =>
+                                prev.map((b, i): TemplateButton => {
+                                  if (i !== idx) return b
+                                  if (val === 'URL') {
+                                    return { type: 'URL', text: b.text, url: 'https://' }
+                                  }
+                                  if (val === 'PHONE_NUMBER') {
+                                    return { type: 'PHONE_NUMBER', text: b.text, phone_number: '+91' }
+                                  }
+                                  return { type: 'QUICK_REPLY', text: b.text }
+                                })
+                              )
+                            }}
+                          >
+                            <SelectTrigger className="h-8 text-xs mt-0.5">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="QUICK_REPLY">Quick Reply (Text)</SelectItem>
+                              <SelectItem value="URL">Visit Website (URL)</SelectItem>
+                              <SelectItem value="PHONE_NUMBER">Call Phone Number</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Button Label (Max 25 chars)</Label>
+                          <Input
+                            value={btn.text}
+                            maxLength={25}
+                            placeholder="e.g. Chat with us"
+                            className="h-8 text-xs mt-0.5"
+                            onChange={(e) => {
+                              const val = e.target.value
+                              setFormButtons((prev) =>
+                                prev.map((b, i) => (i === idx ? { ...b, text: val } : b))
+                              )
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {btn.type === 'URL' && (
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Website URL (starting with https://)</Label>
+                          <Input
+                            value={btn.url || ''}
+                            placeholder="https://example.com/order"
+                            className="h-8 text-xs mt-0.5 font-mono"
+                            onChange={(e) => {
+                              const val = e.target.value
+                              setFormButtons((prev) =>
+                                prev.map((b, i) => (i === idx && b.type === 'URL' ? { ...b, url: val } : b))
+                              )
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {btn.type === 'PHONE_NUMBER' && (
+                        <div>
+                          <Label className="text-[10px] text-muted-foreground">Phone Number (with Country Code)</Label>
+                          <Input
+                            value={btn.phone_number || ''}
+                            placeholder="+919876543210"
+                            className="h-8 text-xs mt-0.5 font-mono"
+                            onChange={(e) => {
+                              const val = e.target.value
+                              setFormButtons((prev) =>
+                                prev.map((b, i) => (i === idx && b.type === 'PHONE_NUMBER' ? { ...b, phone_number: val } : b))
+                              )
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Live WhatsApp Bubble Preview */}
+            <div className="pt-2 border-t border-border/70 space-y-2">
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Live WhatsApp Message Preview
+              </Label>
+              <div className="rounded-2xl border border-border bg-slate-100 dark:bg-slate-900/80 p-4">
+                <div className="rounded-xl bg-white dark:bg-slate-800 p-3.5 shadow-sm text-xs space-y-2 max-w-sm">
+                  {formHeaderType === 'text' && formHeaderText && (
+                    <p className="font-bold text-xs pb-1 border-b border-border/50 text-foreground">
+                      {formHeaderText}
+                    </p>
+                  )}
+                  {['image', 'video', 'document'].includes(formHeaderType) && (
+                    <div className="rounded-lg bg-muted/60 p-2 text-center text-[11px] font-semibold text-muted-foreground uppercase">
+                      [{formHeaderType.toUpperCase()} HEADER]
+                    </div>
+                  )}
+                  <p className="whitespace-pre-wrap leading-relaxed text-foreground/90 font-sans">
+                    {formBodyText || 'Enter your body text above to preview the WhatsApp message...'}
+                  </p>
+                  {formFooterText && (
+                    <p className="text-[10px] text-muted-foreground italic pt-1 border-t border-border/40">
+                      {formFooterText}
+                    </p>
+                  )}
+                  {formButtons.length > 0 && (
+                    <div className="border-t border-border/40 pt-2 space-y-1.5">
+                      {formButtons.map((btn, bIdx) => (
+                        <div
+                          key={bIdx}
+                          className="flex items-center justify-center rounded-lg border border-border/70 bg-background/80 py-1.5 px-3 text-xs font-semibold text-primary shadow-xs"
+                        >
+                          {btn.text || `Button #${bIdx + 1}`}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
