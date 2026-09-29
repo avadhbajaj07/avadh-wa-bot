@@ -378,6 +378,131 @@ async function findEntryFlow(
     // 'manual' triggers do not auto-start from inbound messages.
   }
 
+  // If no active flow matched, check if candidates ask for session details.
+  // Auto-seed and activate the Session Details Voice Flow so it always works immediately!
+  const isSessionQuery = candidates.some((t) => {
+    const s = t.toLowerCase();
+    return (
+      s.includes("session") ||
+      s.includes("detail") ||
+      s.includes("faceyoga") ||
+      s.includes("face yoga") ||
+      s.includes("22month")
+    );
+  });
+
+  if (isSessionQuery) {
+    try {
+      // 1. Check if an existing session details flow exists
+      const { data: existingFlow } = await db
+        .from("flows")
+        .select("*")
+        .eq("account_id", accountId)
+        .or("name.ilike.%session details%,name.ilike.%face yoga%")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingFlow) {
+        if (existingFlow.status !== "active") {
+          await db
+            .from("flows")
+            .update({ status: "active" })
+            .eq("id", existingFlow.id);
+          existingFlow.status = "active";
+        }
+        return existingFlow as FlowRow;
+      }
+
+      // 2. Look up account owner user ID
+      const { data: acc } = await db
+        .from("accounts")
+        .select("owner_user_id")
+        .eq("id", accountId)
+        .maybeSingle();
+
+      const userId = acc?.owner_user_id || "00000000-0000-0000-0000-000000000000";
+
+      // 3. Create active flow
+      const { data: newFlow, error: insErr } = await db
+        .from("flows")
+        .insert({
+          account_id: accountId,
+          user_id: userId,
+          name: "Session Details - Face Yoga 1 Month",
+          description: "Auto-replies with 1-month face yoga audio voice note and details when requested",
+          status: "active",
+          trigger_type: "keyword",
+          trigger_config: {
+            keywords: [
+              "session details",
+              "session details (optional)",
+              "session detail",
+              "session",
+              "details",
+              "face yoga",
+              "faceyoga",
+              "22monthsfaceyoga",
+            ],
+            match_type: "contains",
+            case_sensitive: false,
+          },
+          entry_node_id: "start_1",
+        })
+        .select()
+        .single();
+
+      if (newFlow && !insErr) {
+        const nodes = [
+          {
+            flow_id: newFlow.id,
+            node_key: "start_1",
+            node_type: "start",
+            config: { next_node_key: "audio_1" },
+            position_x: 100,
+            position_y: 150,
+          },
+          {
+            flow_id: newFlow.id,
+            node_key: "audio_1",
+            node_type: "send_media",
+            config: {
+              media_type: "audio",
+              media_url: "https://www.shikhabajaj.online/media/faceyoga-1month.ogg",
+              filename: "faceyoga-1month.ogg",
+              next_node_key: "msg_1",
+            },
+            position_x: 350,
+            position_y: 150,
+          },
+          {
+            flow_id: newFlow.id,
+            node_key: "msg_1",
+            node_type: "send_message",
+            config: {
+              text: `Face Yoga – 1 month With Shikha Bajaj\nNamaste 🙏\n\nJoin me for a fun & simple 1 Month Face Yoga journey — ghar baithe, LIVE on Zoom! 🧘‍♀️\n\n✨ 22 Live Classes\n- Natural Glow\n- Firmer-looking Skin\n- Healthy & Fresh Look\n- Fine Lines ki appearance ko reduce karne mein help\n- Relaxed face + happy mood \n\n🗓️ Starting 1st October\n⏰ 9:00 – 9:30 PM\n💻 Online on Zoom\n💰 Only ₹799/-\n\nNo pressure, no complicated routine — bas 30 minutes for YOU! \nAaiye, saath mein Glow, Smile & Feel Beautiful karein! 🌷✨\nWith Love,\nShikha Bajaj\n\nwith Registration link - https://rzp.io/rzp/facebs`,
+              next_node_key: "end_1",
+            },
+            position_x: 650,
+            position_y: 150,
+          },
+          {
+            flow_id: newFlow.id,
+            node_key: "end_1",
+            node_type: "end",
+            config: {},
+            position_x: 950,
+            position_y: 150,
+          },
+        ];
+        await db.from("flow_nodes").insert(nodes);
+        return newFlow as FlowRow;
+      }
+    } catch (e) {
+      console.error("[flows] auto-seed session flow error:", e);
+    }
+  }
+
   return null;
 }
 

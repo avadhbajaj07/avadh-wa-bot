@@ -241,7 +241,7 @@ function FlowNodeCard({ data, selected }: NodeProps) {
                   </div>
                   <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground font-mono">
                     <Volume2 className="size-3 text-emerald-500 shrink-0" />
-                    <span className="truncate">{typeof cfg.media_url === 'string' ? cfg.media_url.split('/').pop() : 'session-details.ogg'}</span>
+                    <span className="truncate">{typeof cfg.media_url === 'string' ? cfg.media_url.split('/').pop() : 'faceyoga-1month.ogg'}</span>
                   </div>
                 </div>
               </div>

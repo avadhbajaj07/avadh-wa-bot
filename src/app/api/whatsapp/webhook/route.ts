@@ -1,7 +1,7 @@
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
-import { getMediaUrl, downloadMedia, sendMediaMessage, sendTextMessage } from '@/lib/whatsapp/meta-api'
+import { getMediaUrl, downloadMedia, sendMediaMessage, sendTextMessage, sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { mirrorInboundMedia } from '@/lib/whatsapp/mirror-inbound-media'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import {
@@ -1197,6 +1197,101 @@ async function processMessage(
 
   // AI auto-reply disabled per user request ("stop ai automation")
   // Both rule-based smart reply and LLM auto-reply are stopped.
+
+  // Fail-safe handler for Session Details audio voice note + template/message
+  const checkText = `${inboundText} ${interactiveReplyId ?? ''}`.toLowerCase()
+  const isSessionDetails =
+    checkText.includes('session') ||
+    checkText.includes('detail') ||
+    checkText.includes('faceyoga') ||
+    checkText.includes('face yoga') ||
+    checkText.includes('22month')
+
+  if (!flowConsumed && isSessionDetails) {
+    try {
+      const { phoneNumberId, accessToken } = await loadAccountMetaCredentials(supabaseAdmin(), accountId)
+      const sendTarget = resolveContactSendTarget(contactRecord)
+      if (sendTarget) {
+        const to = sendTarget.target
+        // 1. Send Voice Note Audio
+        const audioRes = await sendMediaMessage({
+          phoneNumberId,
+          accessToken,
+          to,
+          kind: 'audio',
+          link: 'https://www.shikhabajaj.online/media/faceyoga-1month.ogg',
+        })
+        await supabaseAdmin().from('messages').insert({
+          conversation_id: conversation.id,
+          sender_type: 'bot',
+          content_type: 'audio',
+          media_url: 'https://www.shikhabajaj.online/media/faceyoga-1month.ogg',
+          message_id: audioRes.messageId,
+          status: 'sent',
+        })
+
+        // 2. Try template 22monthsfaceyoga first, fallback to message
+        let templateSent = false
+        try {
+          const { data: tpl } = await supabaseAdmin()
+            .from('message_templates')
+            .select('*')
+            .eq('account_id', accountId)
+            .ilike('name', '%22monthsfaceyoga%')
+            .maybeSingle()
+
+          if (tpl && (tpl.status === 'Approved' || tpl.status === 'APPROVED' || tpl.status === 'active' || tpl.status === 'ACTIVE' || !tpl.status?.toLowerCase().includes('reject'))) {
+            const tplRes = await sendTemplateMessage({
+              phoneNumberId,
+              accessToken,
+              to,
+              templateName: tpl.name,
+              language: tpl.language || 'en',
+              template: tpl,
+            })
+            await supabaseAdmin().from('messages').insert({
+              conversation_id: conversation.id,
+              sender_type: 'bot',
+              content_type: 'template',
+              template_name: tpl.name,
+              message_id: tplRes.messageId,
+              status: 'sent',
+            })
+            templateSent = true
+          }
+        } catch (tplErr) {
+          console.warn('[webhook] template 22monthsfaceyoga send error, falling back to message text:', tplErr)
+        }
+
+        if (!templateSent) {
+          const messageBody = `Face Yoga – 1 month With Shikha Bajaj\nNamaste 🙏\n\nJoin me for a fun & simple 1 Month Face Yoga journey — ghar baithe, LIVE on Zoom! 🧘‍♀️\n\n✨ 22 Live Classes\n- Natural Glow\n- Firmer-looking Skin\n- Healthy & Fresh Look\n- Fine Lines ki appearance ko reduce karne mein help\n- Relaxed face + happy mood \n\n🗓️ Starting 1st October\n⏰ 9:00 – 9:30 PM\n💻 Online on Zoom\n💰 Only ₹799/-\n\nNo pressure, no complicated routine — bas 30 minutes for YOU! \nAaiye, saath mein Glow, Smile & Feel Beautiful karein! 🌷✨\nWith Love,\nShikha Bajaj\n\nwith Registration link - https://rzp.io/rzp/facebs`
+
+          const msgRes = await sendTextMessage({
+            phoneNumberId,
+            accessToken,
+            to,
+            text: messageBody,
+          })
+          await supabaseAdmin().from('messages').insert({
+            conversation_id: conversation.id,
+            sender_type: 'bot',
+            content_type: 'text',
+            content_text: messageBody,
+            message_id: msgRes.messageId,
+            status: 'sent',
+          })
+        }
+
+        await supabaseAdmin().from('conversations').update({
+          last_message_text: '[audio] Voice Note sent',
+          last_message_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', conversation.id)
+      }
+    } catch (err) {
+      console.error('[webhook] session details voice note / details fail-safe error:', err)
+    }
+  }
 
   // message.received webhook (public API). Awaited — not fire-and-forget
   // — because we're inside the route's `after()` block, which only keeps
