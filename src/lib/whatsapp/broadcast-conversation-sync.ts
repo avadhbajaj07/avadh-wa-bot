@@ -229,9 +229,13 @@ export async function syncBroadcastRecipientsToConversations(
       broadcast:broadcasts!inner(id, account_id, template_name, template_language)
     `)
     .eq('broadcast.account_id', accountId)
-    .in('status', ['sent', 'delivered', 'read'])
+    .in('status', ['sent', 'delivered', 'read', 'replied'])
     .not('contact_id', 'is', null)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: false });
+
+  if (typeof (query as any).limit === 'function') {
+    query = (query as any).limit(500);
+  }
 
   if (broadcastId) {
     query = query.eq('broadcast_id', broadcastId);
@@ -260,44 +264,52 @@ export async function syncBroadcastRecipientsToConversations(
   }
 
   let synced = 0;
+  const BATCH_SIZE = 15;
 
-  for (const rec of recipients) {
-    try {
-      const broadcastInfo = Array.isArray(rec.broadcast)
-        ? rec.broadcast[0]
-        : rec.broadcast;
-      if (!broadcastInfo) continue;
+  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+    const chunk = recipients.slice(i, i + BATCH_SIZE);
+    await Promise.all(
+      chunk.map(async (rec) => {
+        try {
+          const broadcastInfo = Array.isArray(rec.broadcast)
+            ? rec.broadcast[0]
+            : rec.broadcast;
+          if (!broadcastInfo) return;
 
-      const templateRow = await getTemplate(
-        broadcastInfo.template_name,
-        broadcastInfo.template_language
-      );
+          const templateRow = await getTemplate(
+            broadcastInfo.template_name,
+            broadcastInfo.template_language
+          );
 
-      const params = Array.isArray(rec.template_params)
-        ? rec.template_params.filter((p: unknown): p is string => typeof p === 'string')
-        : [];
+          const params = Array.isArray(rec.template_params)
+            ? rec.template_params.filter((p: unknown): p is string => typeof p === 'string')
+            : [];
 
-      const res = await recordOutboundBroadcastMessage({
-        db,
-        accountId,
-        contactId: rec.contact_id,
-        userId: auditUserId,
-        templateName: broadcastInfo.template_name,
-        templateRow,
-        params,
-        whatsappMessageId: rec.whatsapp_message_id,
-        status: rec.status as 'sent' | 'delivered' | 'read',
-        sentAt: rec.sent_at || rec.created_at,
-      });
+          const safeStatus = rec.status === 'replied' ? 'read' : rec.status;
 
-      if (res) synced++;
-    } catch (err) {
-      console.error(
-        '[syncBroadcastRecipientsToConversations] Error processing recipient:',
-        rec.id,
-        err
-      );
-    }
+          const res = await recordOutboundBroadcastMessage({
+            db,
+            accountId,
+            contactId: rec.contact_id,
+            userId: auditUserId,
+            templateName: broadcastInfo.template_name,
+            templateRow,
+            params,
+            whatsappMessageId: rec.whatsapp_message_id,
+            status: safeStatus as 'sent' | 'delivered' | 'read' | 'failed',
+            sentAt: rec.sent_at || rec.created_at,
+          });
+
+          if (res) synced++;
+        } catch (err) {
+          console.error(
+            '[syncBroadcastRecipientsToConversations] Error processing recipient:',
+            rec.id,
+            err
+          );
+        }
+      })
+    );
   }
 
   return { total: recipients.length, synced };

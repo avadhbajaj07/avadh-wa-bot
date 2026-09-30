@@ -17,11 +17,85 @@ export interface LeadContact {
   tags?: { id: string; name: string; color: string }[];
 }
 
+export function classifyLeadAction(
+  text: string,
+  interactiveId?: string | null
+): {
+  action: 'register' | 'session';
+  actionLabel: string;
+} {
+  const combined = `${text || ''} ${interactiveId || ''}`.toLowerCase();
+
+  // Register intent keywords
+  const registerKeywords = [
+    'register',
+    'registration',
+    'reg',
+    'enroll',
+    'enrol',
+    'book',
+    'booking',
+    'pay',
+    'payment',
+    'fee',
+    'fees',
+    'join',
+    'buy',
+    'rzp',
+    'price',
+    'cost',
+    'admission',
+  ];
+
+  if (registerKeywords.some((kw) => combined.includes(kw))) {
+    return {
+      action: 'register',
+      actionLabel: 'Clicked Register Now',
+    };
+  }
+
+  // Session intent keywords
+  const sessionKeywords = [
+    'session',
+    'detail',
+    'details',
+    'faceyoga',
+    'face yoga',
+    'yoga',
+    '22month',
+    'class',
+    'classes',
+    'timing',
+    'time',
+    'zoom',
+    'batch',
+    'schedule',
+    'link',
+    'info',
+  ];
+
+  if (sessionKeywords.some((kw) => combined.includes(kw))) {
+    return {
+      action: 'session',
+      actionLabel: 'Clicked Session Details',
+    };
+  }
+
+  // Any other customer reply or interactive tap
+  const cleanSnippet = text?.trim() || interactiveId?.trim() || '';
+  return {
+    action: 'session',
+    actionLabel: cleanSnippet
+      ? `Replied: "${cleanSnippet.slice(0, 30)}"`
+      : 'Responded to Campaign',
+  };
+}
+
 export async function GET(request: Request) {
   try {
     const { accountId } = await requireRole('agent');
     const { searchParams } = new URL(request.url);
-    const daysParam = searchParams.get('days') || '2';
+    const daysParam = searchParams.get('days') || 'all';
     const filterParam = searchParams.get('filter') || 'all'; // 'all' | 'register' | 'session'
     const search = searchParams.get('search')?.trim().toLowerCase() || '';
 
@@ -36,37 +110,39 @@ export async function GET(request: Request) {
       sinceIso = d.toISOString();
     }
 
-    // 2. Fetch conversations for this account
-    const { data: convData, error: convErr } = await admin
+    // 2. Fetch conversations for this account, ordered by most recent activity
+    let convQuery = admin
       .from('conversations')
-      .select('id, contact_id')
-      .eq('account_id', accountId);
+      .select('id, contact_id, last_message_at, updated_at')
+      .eq('account_id', accountId)
+      .order('updated_at', { ascending: false })
+      .limit(5000);
 
-    if (convErr || !convData || convData.length === 0) {
-      return NextResponse.json({
-        leads: [],
-        counts: { total: 0, register: 0, session: 0 },
-        timeframeDays: daysParam,
-      });
+    if (sinceIso) {
+      convQuery = convQuery.or(
+        `updated_at.gte.${sinceIso},last_message_at.gte.${sinceIso}`
+      );
+    }
+
+    const { data: convData, error: convErr } = await convQuery;
+    if (convErr) {
+      console.error('[leads] error fetching conversations:', convErr);
     }
 
     const convMap = new Map<string, string>(); // convId -> contactId
-    convData.forEach((c: { id: string; contact_id: string | null }) => {
-      if (c.contact_id) convMap.set(c.id, c.contact_id);
+    const contactToConvMap = new Map<string, string>(); // contactId -> convId
+    (convData || []).forEach((c: { id: string; contact_id: string | null }) => {
+      if (c.contact_id) {
+        convMap.set(c.id, c.contact_id);
+        if (!contactToConvMap.has(c.contact_id)) {
+          contactToConvMap.set(c.contact_id, c.id);
+        }
+      }
     });
 
     const convIds = Array.from(convMap.keys());
-    if (convIds.length === 0) {
-      return NextResponse.json({
-        leads: [],
-        counts: { total: 0, register: 0, session: 0 },
-        timeframeDays: daysParam,
-      });
-    }
 
-    // 3. Query customer messages matching register or session
-    // Batch in chunks if large to prevent statement size limits
-    const CHUNK_SIZE = 200;
+    // 3. Query customer messages
     const allMatchingMessages: Array<{
       conversation_id: string;
       content_text: string | null;
@@ -74,6 +150,7 @@ export async function GET(request: Request) {
       created_at: string;
     }> = [];
 
+    const CHUNK_SIZE = 200;
     for (let i = 0; i < convIds.length; i += CHUNK_SIZE) {
       const chunk = convIds.slice(i, i + CHUNK_SIZE);
       let query = admin
@@ -81,13 +158,12 @@ export async function GET(request: Request) {
         .select('conversation_id, content_text, interactive_reply_id, created_at')
         .in('conversation_id', chunk)
         .eq('sender_type', 'customer')
-        .or(
-          'content_text.ilike.%register%,content_text.ilike.%session%,interactive_reply_id.ilike.%register%,interactive_reply_id.ilike.%session%'
-        )
         .order('created_at', { ascending: false });
 
       if (sinceIso) {
         query = query.gte('created_at', sinceIso);
+      } else {
+        query = query.limit(2000);
       }
 
       const { data: msgs, error: msgsErr } = await query;
@@ -96,11 +172,31 @@ export async function GET(request: Request) {
       }
     }
 
-    // 4. Group by contact_id, keep latest interaction & classify action
+    // 4. Also fetch broadcast campaign recipients who replied
+    let broadcastRepliesQuery = admin
+      .from('broadcast_recipients')
+      .select(`
+        contact_id,
+        replied_at,
+        whatsapp_message_id,
+        broadcast:broadcasts!inner(account_id)
+      `)
+      .eq('broadcast.account_id', accountId)
+      .eq('status', 'replied')
+      .order('replied_at', { ascending: false })
+      .limit(1000);
+
+    if (sinceIso) {
+      broadcastRepliesQuery = broadcastRepliesQuery.gte('replied_at', sinceIso);
+    }
+
+    const { data: brData } = await broadcastRepliesQuery;
+
+    // 5. Group by contact_id, keep latest interaction & classify action
     const contactInteractions = new Map<
       string,
       {
-        conversationId: string;
+        conversationId: string | null;
         action: 'register' | 'session';
         actionLabel: string;
         snippet: string;
@@ -115,25 +211,38 @@ export async function GET(request: Request) {
       const contactId = convMap.get(msg.conversation_id);
       if (!contactId) continue;
 
-      const text = `${msg.content_text || ''} ${msg.interactive_reply_id || ''}`.toLowerCase();
-      const isRegister = text.includes('register');
-      const isSession = text.includes('session');
-
-      const action: 'register' | 'session' = isRegister ? 'register' : 'session';
-      const actionLabel = isRegister ? 'Clicked Register Now' : 'Clicked Session Details';
-      const snippet = (msg.content_text || msg.interactive_reply_id || '').trim();
+      const rawText = msg.content_text || msg.interactive_reply_id || '';
+      const classification = classifyLeadAction(rawText, msg.interactive_reply_id);
+      const snippet = rawText.trim();
 
       if (!contactInteractions.has(contactId)) {
         contactInteractions.set(contactId, {
           conversationId: msg.conversation_id,
-          action,
-          actionLabel,
+          action: classification.action,
+          actionLabel: classification.actionLabel,
           snippet,
           lastInteractionAt: msg.created_at,
         });
 
-        if (isRegister) totalRegister++;
+        if (classification.action === 'register') totalRegister++;
         else totalSession++;
+      }
+    }
+
+    // Merge replied broadcast recipients
+    if (brData) {
+      for (const br of brData) {
+        if (!br.contact_id) continue;
+        if (!contactInteractions.has(br.contact_id)) {
+          contactInteractions.set(br.contact_id, {
+            conversationId: contactToConvMap.get(br.contact_id) || null,
+            action: 'session',
+            actionLabel: 'Replied to Campaign',
+            snippet: 'Replied to broadcast campaign',
+            lastInteractionAt: br.replied_at || new Date().toISOString(),
+          });
+          totalSession++;
+        }
       }
     }
 
@@ -146,38 +255,52 @@ export async function GET(request: Request) {
       });
     }
 
-    // 5. Fetch contacts details
-    const { data: contactsData, error: contactsErr } = await admin
-      .from('contacts')
-      .select('id, name, phone, email')
-      .in('id', matchedContactIds);
+    // 6. Fetch contacts details (in chunks if large)
+    const contactsData: Array<{
+      id: string;
+      name: string | null;
+      phone: string;
+      email: string | null;
+    }> = [];
 
-    if (contactsErr || !contactsData) {
-      return NextResponse.json({
-        leads: [],
-        counts: { total: 0, register: 0, session: 0 },
-        timeframeDays: daysParam,
+    const CONTACT_CHUNK = 200;
+    for (let i = 0; i < matchedContactIds.length; i += CONTACT_CHUNK) {
+      const chunk = matchedContactIds.slice(i, i + CONTACT_CHUNK);
+      const { data: cData, error: cErr } = await admin
+        .from('contacts')
+        .select('id, name, phone, email')
+        .in('id', chunk);
+
+      if (!cErr && cData) {
+        contactsData.push(...cData);
+      }
+    }
+
+    // 7. Fetch tags for these contacts
+    const tagsByContact = new Map<
+      string,
+      Array<{ id: string; name: string; color: string }>
+    >();
+
+    for (let i = 0; i < matchedContactIds.length; i += CONTACT_CHUNK) {
+      const chunk = matchedContactIds.slice(i, i + CONTACT_CHUNK);
+      const { data: contactTagsData } = await admin
+        .from('contact_tags')
+        .select('contact_id, tags(id, name, color)')
+        .in('contact_id', chunk);
+
+      (contactTagsData ?? []).forEach((ct: any) => {
+        if (ct.contact_id && ct.tags) {
+          const existing = tagsByContact.get(ct.contact_id) || [];
+          existing.push(ct.tags);
+          tagsByContact.set(ct.contact_id, existing);
+        }
       });
     }
 
-    // 6. Fetch tags for these contacts
-    const { data: contactTagsData } = await admin
-      .from('contact_tags')
-      .select('contact_id, tags(id, name, color)')
-      .in('contact_id', matchedContactIds);
-
-    const tagsByContact = new Map<string, Array<{ id: string; name: string; color: string }>>();
-    (contactTagsData ?? []).forEach((ct: any) => {
-      if (ct.contact_id && ct.tags) {
-        const existing = tagsByContact.get(ct.contact_id) || [];
-        existing.push(ct.tags);
-        tagsByContact.set(ct.contact_id, existing);
-      }
-    });
-
-    // 7. Assemble leads list
+    // 8. Assemble leads list
     let leads: LeadContact[] = contactsData
-      .map((c: { id: string; name: string | null; phone: string; email: string | null }) => {
+      .map((c) => {
         const interaction = contactInteractions.get(c.id)!;
         return {
           id: c.id,
@@ -192,7 +315,11 @@ export async function GET(request: Request) {
           tags: tagsByContact.get(c.id) || [],
         };
       })
-      .sort((a, b) => new Date(b.lastInteractionAt).getTime() - new Date(a.lastInteractionAt).getTime());
+      .sort(
+        (a, b) =>
+          new Date(b.lastInteractionAt).getTime() -
+          new Date(a.lastInteractionAt).getTime()
+      );
 
     // Apply action filter if requested
     if (filterParam === 'register') {

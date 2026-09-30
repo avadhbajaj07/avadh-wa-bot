@@ -3,6 +3,8 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { syncBroadcastRecipientsToConversations } from '@/lib/whatsapp/broadcast-conversation-sync';
 
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   try {
     const { accountId } = await requireRole('agent');

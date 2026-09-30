@@ -46,7 +46,7 @@ export default function LeadsPage() {
   const [leads, setLeads] = useState<LeadContact[]>([]);
   const [counts, setCounts] = useState({ total: 0, register: 0, session: 0 });
   const [search, setSearch] = useState('');
-  const [days, setDays] = useState<'1' | '2' | '7' | 'all'>('2');
+  const [days, setDays] = useState<'1' | '2' | '7' | 'all'>('all');
   const [filterAction, setFilterAction] = useState<'all' | 'register' | 'session'>('all');
   const [copied, setCopied] = useState(false);
 
@@ -429,7 +429,7 @@ export default function LeadsPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => router.push(`/inbox?conversationId=${lead.conversationId}`)}
+                          onClick={() => router.push(`/inbox?c=${lead.conversationId}`)}
                           className="h-7 text-xs text-primary hover:text-primary hover:bg-primary/10"
                         >
                           <MessageSquare className="size-3 mr-1" />
