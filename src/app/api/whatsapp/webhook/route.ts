@@ -1201,7 +1201,10 @@ async function processMessage(
   // AI auto-reply disabled per user request ("stop ai automation")
   // Both rule-based smart reply and LLM auto-reply are stopped.
 
-  // Fail-safe handler for Session Details audio voice note + template/message
+  // Session Details: send 22monthsfaceyoga template
+  // The flow engine handles audio + text message. This handler sends the
+  // template on top of that. If the flow didn't fire, this also sends
+  // audio + text as a fail-safe.
   const checkText = `${inboundText} ${interactiveReplyId ?? ''}`.toLowerCase()
   const isSessionDetails =
     checkText.includes('session') ||
@@ -1210,30 +1213,34 @@ async function processMessage(
     checkText.includes('face yoga') ||
     checkText.includes('22month')
 
-  if (!flowConsumed && isSessionDetails) {
+  if (isSessionDetails) {
     try {
       const { phoneNumberId, accessToken } = await loadAccountMetaCredentials(supabaseAdmin(), accountId)
       const sendTarget = resolveContactSendTarget(contactRecord)
       if (sendTarget) {
         const to = sendTarget.target
-        // 1. Send Voice Note Audio
-        const audioRes = await sendMediaMessage({
-          phoneNumberId,
-          accessToken,
-          to,
-          kind: 'audio',
-          link: 'https://www.shikhabajaj.online/media/faceyoga-1month.ogg',
-        })
-        await supabaseAdmin().from('messages').insert({
-          conversation_id: conversation.id,
-          sender_type: 'bot',
-          content_type: 'audio',
-          media_url: 'https://www.shikhabajaj.online/media/faceyoga-1month.ogg',
-          message_id: audioRes.messageId,
-          status: 'sent',
-        })
 
-        // 2. Send template 22monthsfaceyoga along with audio
+        // If the flow didn't fire, send audio + text as fail-safe
+        if (!flowConsumed) {
+          // 1. Send Voice Note Audio
+          const audioRes = await sendMediaMessage({
+            phoneNumberId,
+            accessToken,
+            to,
+            kind: 'audio',
+            link: 'https://www.shikhabajaj.online/media/faceyoga-1month.ogg',
+          })
+          await supabaseAdmin().from('messages').insert({
+            conversation_id: conversation.id,
+            sender_type: 'bot',
+            content_type: 'audio',
+            media_url: 'https://www.shikhabajaj.online/media/faceyoga-1month.ogg',
+            message_id: audioRes.messageId,
+            status: 'sent',
+          })
+        }
+
+        // 2. Always send template 22monthsfaceyoga
         let templateSent = false
         try {
           const { data: tpl } = await supabaseAdmin()
@@ -1282,7 +1289,8 @@ async function processMessage(
           console.warn('[webhook] template 22monthsfaceyoga send error, falling back to message text:', tplErr)
         }
 
-        if (!templateSent) {
+        // 3. If template failed AND flow didn't send text, send text as fallback
+        if (!templateSent && !flowConsumed) {
           const messageBody = `Face Yoga – 1 month With Shikha Bajaj\nNamaste 🙏\n\nJoin me for a fun & simple 1 Month Face Yoga journey — ghar baithe, LIVE on Zoom! 🧘‍♀️\n\n✨ 22 Live Classes\n- Natural Glow\n- Firmer-looking Skin\n- Healthy & Fresh Look\n- Fine Lines ki appearance ko reduce karne mein help\n- Relaxed face + happy mood \n\n🗓️ Starting 1st October\n⏰ 9:00 – 9:30 PM\n💻 Online on Zoom\n💰 Only ₹799/-\n\nNo pressure, no complicated routine — bas 30 minutes for YOU! \nAaiye, saath mein Glow, Smile & Feel Beautiful karein! 🌷✨\nWith Love,\nShikha Bajaj\n\nwith Registration link - https://rzp.io/rzp/facebs`
 
           const msgRes = await sendTextMessage({

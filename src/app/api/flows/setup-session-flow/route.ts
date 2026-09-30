@@ -298,7 +298,10 @@ async function handleSessionFlowSetup(request: Request) {
         .eq('id', targetFlowId);
     }
 
-    // 7. Delete existing nodes for this flow and recreate with audio + template
+    // 7. Delete existing nodes for this flow and recreate with audio + message
+    // Note: The 22monthsfaceyoga template is sent by the webhook fail-safe
+    // handler, not by the flow engine, because the DB's flow_nodes_node_type_check
+    // constraint doesn't include 'send_template' as a valid node type.
     await admin.from('flow_nodes').delete().eq('flow_id', targetFlowId);
 
     const nodes = [
@@ -318,18 +321,17 @@ async function handleSessionFlowSetup(request: Request) {
           media_type: 'audio',
           media_url: AUDIO_URL,
           filename: 'faceyoga-1month.ogg',
-          next_node_key: 'tpl_1',
+          next_node_key: 'msg_1',
         },
         position_x: 350,
         position_y: 150,
       },
       {
         flow_id: targetFlowId,
-        node_key: 'tpl_1',
-        node_type: 'send_template',
+        node_key: 'msg_1',
+        node_type: 'send_message',
         config: {
-          template_name: TEMPLATE_NAME,
-          language: 'en',
+          text: FACE_YOGA_MESSAGE_TEXT,
           next_node_key: 'end_1',
         },
         position_x: 650,
