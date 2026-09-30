@@ -39,6 +39,7 @@ import {
   engineSendMedia,
   engineSendText,
 } from "./meta-send";
+import { engineSendTemplate } from "@/lib/automations/meta-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
 import { removeContactTag } from "@/lib/contacts/tag-write";
@@ -55,6 +56,7 @@ import {
   type SendListNodeConfig,
   type SendMediaNodeConfig,
   type SendMessageNodeConfig,
+  type SendTemplateNodeConfig,
   type SetTagNodeConfig,
   type StartNodeConfig,
   type KeywordTriggerConfig,
@@ -818,6 +820,48 @@ async function advanceFromNodeKey(
         });
         await endRun(db, run.id, "failed", "send_media_failed");
         return { outcome: "completed" };
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "send_template") {
+      const cfg = node.config as unknown as SendTemplateNodeConfig;
+      try {
+        let sentResult: { whatsapp_message_id: string } | null = null;
+        try {
+          sentResult = await engineSendTemplate({
+            accountId: run.account_id,
+            userId: run.user_id,
+            conversationId: run.conversation_id!,
+            contactId: run.contact_id!,
+            templateName: cfg.template_name,
+            language: cfg.language || 'en',
+            params: cfg.variables ? Object.values(cfg.variables) : [],
+          });
+        } catch (enErr) {
+          console.warn('[flows engine] template send with primary language failed, retrying with en_US:', enErr);
+          sentResult = await engineSendTemplate({
+            accountId: run.account_id,
+            userId: run.user_id,
+            conversationId: run.conversation_id!,
+            contactId: run.contact_id!,
+            templateName: cfg.template_name,
+            language: 'en_US',
+            params: cfg.variables ? Object.values(cfg.variables) : [],
+          });
+        }
+        if (sentResult?.whatsapp_message_id) {
+          await logEvent(db, run.id, "message_sent", node.node_key, {
+            node_type: "send_template",
+            template_name: cfg.template_name,
+            whatsapp_message_id: sentResult.whatsapp_message_id,
+          });
+        }
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_template_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
       }
       currentKey = cfg.next_node_key;
       continue;

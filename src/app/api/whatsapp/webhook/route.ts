@@ -41,9 +41,12 @@ export const maxDuration = 60
 let _adminClient: any = null
 function supabaseAdmin() {
   if (!_adminClient) {
+    const key =
+      process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     _adminClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      key
     )
   }
   return _adminClient
@@ -1230,7 +1233,7 @@ async function processMessage(
           status: 'sent',
         })
 
-        // 2. Try template 22monthsfaceyoga first, fallback to message
+        // 2. Send template 22monthsfaceyoga along with audio
         let templateSent = false
         try {
           const { data: tpl } = await supabaseAdmin()
@@ -1240,20 +1243,36 @@ async function processMessage(
             .ilike('name', '%22monthsfaceyoga%')
             .maybeSingle()
 
-          if (tpl && (tpl.status === 'Approved' || tpl.status === 'APPROVED' || tpl.status === 'active' || tpl.status === 'ACTIVE' || !tpl.status?.toLowerCase().includes('reject'))) {
-            const tplRes = await sendTemplateMessage({
+          const targetLang = tpl?.language || 'en'
+          let tplRes: { messageId: string } | null = null
+
+          try {
+            tplRes = await sendTemplateMessage({
               phoneNumberId,
               accessToken,
               to,
-              templateName: tpl.name,
-              language: tpl.language || 'en',
-              template: tpl,
+              templateName: '22monthsfaceyoga',
+              language: targetLang,
+              template: tpl ?? undefined,
             })
+          } catch (langErr) {
+            console.warn('[webhook] template 22monthsfaceyoga send with', targetLang, 'failed, retrying with en_US:', langErr)
+            tplRes = await sendTemplateMessage({
+              phoneNumberId,
+              accessToken,
+              to,
+              templateName: '22monthsfaceyoga',
+              language: 'en_US',
+              template: tpl ?? undefined,
+            })
+          }
+
+          if (tplRes?.messageId) {
             await supabaseAdmin().from('messages').insert({
               conversation_id: conversation.id,
               sender_type: 'bot',
               content_type: 'template',
-              template_name: tpl.name,
+              template_name: '22monthsfaceyoga',
               message_id: tplRes.messageId,
               status: 'sent',
             })
@@ -1283,7 +1302,7 @@ async function processMessage(
         }
 
         await supabaseAdmin().from('conversations').update({
-          last_message_text: '[audio] Voice Note sent',
+          last_message_text: templateSent ? '[template] 22monthsfaceyoga' : '[audio] Voice Note sent',
           last_message_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         }).eq('id', conversation.id)

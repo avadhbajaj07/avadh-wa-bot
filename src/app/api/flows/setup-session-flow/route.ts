@@ -195,6 +195,19 @@ async function handleSessionFlowSetup(request: Request) {
       }
     }
 
+    // Always guarantee 22monthsfaceyoga exists in message_templates table
+    await admin.from('message_templates').upsert({
+      account_id: accountId,
+      user_id: userId,
+      name: TEMPLATE_NAME,
+      category: 'Marketing',
+      language: 'en',
+      body_text: FACE_YOGA_MESSAGE_TEXT,
+      status: 'APPROVED',
+      meta_template_id: TEMPLATE_META_ID,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'account_id,name,language' });
+
     // Also check local message_templates table
     const { data: dbTemplate } = await admin
       .from('message_templates')
@@ -250,7 +263,7 @@ async function handleSessionFlowSetup(request: Request) {
           account_id: accountId,
           user_id: userId,
           name: 'Session Details - Face Yoga 1 Month',
-          description: 'Auto-replies with 1-month face yoga audio voice note and details when requested',
+          description: 'Auto-replies with 1-month face yoga audio voice note and details template when requested',
           status: 'active',
           trigger_type: 'keyword',
           trigger_config: {
@@ -272,7 +285,7 @@ async function handleSessionFlowSetup(request: Request) {
         .from('flows')
         .update({
           name: 'Session Details - Face Yoga 1 Month',
-          description: 'Auto-replies with 1-month face yoga audio voice note and details when requested',
+          description: 'Auto-replies with 1-month face yoga audio voice note and details template when requested',
           status: 'active',
           trigger_type: 'keyword',
           trigger_config: {
@@ -285,7 +298,7 @@ async function handleSessionFlowSetup(request: Request) {
         .eq('id', targetFlowId);
     }
 
-    // 7. Delete existing nodes for this flow and recreate with audio + text
+    // 7. Delete existing nodes for this flow and recreate with audio + template
     await admin.from('flow_nodes').delete().eq('flow_id', targetFlowId);
 
     const nodes = [
@@ -305,17 +318,18 @@ async function handleSessionFlowSetup(request: Request) {
           media_type: 'audio',
           media_url: AUDIO_URL,
           filename: 'faceyoga-1month.ogg',
-          next_node_key: 'msg_1',
+          next_node_key: 'tpl_1',
         },
         position_x: 350,
         position_y: 150,
       },
       {
         flow_id: targetFlowId,
-        node_key: 'msg_1',
-        node_type: 'send_message',
+        node_key: 'tpl_1',
+        node_type: 'send_template',
         config: {
-          text: FACE_YOGA_MESSAGE_TEXT,
+          template_name: TEMPLATE_NAME,
+          language: 'en',
           next_node_key: 'end_1',
         },
         position_x: 650,

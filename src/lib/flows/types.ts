@@ -97,6 +97,13 @@ export interface SendMediaNodeConfig {
   next_node_key: string;
 }
 
+export interface SendTemplateNodeConfig {
+  template_name: string;
+  language?: string;
+  variables?: Record<string, string>;
+  next_node_key: string | null;
+}
+
 export interface HandoffNodeConfig {
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
@@ -190,6 +197,7 @@ export type FlowNodeConfig =
   | { node_type: "send_buttons"; config: SendButtonsNodeConfig }
   | { node_type: "send_list"; config: SendListNodeConfig }
   | { node_type: "send_media"; config: SendMediaNodeConfig }
+  | { node_type: "send_template"; config: SendTemplateNodeConfig }
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
