@@ -149,22 +149,22 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
               <button
                 key={template.id}
                 onClick={() => onSelect(template)}
-                className={`flex flex-col gap-3 rounded-xl border p-4 text-left transition-all ${
+                className={`flex flex-col rounded-xl border p-4 text-left transition-all min-h-[140px] overflow-hidden ${
                   isSelected
                     ? 'border-primary bg-primary/5 ring-1 ring-primary/30'
                     : 'border-border bg-card/50 hover:border-border hover:bg-card'
                 }`}
               >
-                <div className="flex items-start justify-between">
-                  <h3 className="text-sm font-medium text-foreground">{template.name}</h3>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <h3 className="text-sm font-medium text-foreground truncate min-w-0">{template.name}</h3>
                   <span
-                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${catColor}`}
+                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-nowrap shrink-0 ${catColor}`}
                   >
                     {template.category}
                   </span>
                 </div>
-                <p className="line-clamp-3 text-xs text-muted-foreground">{template.body_text}</p>
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                <p className="line-clamp-3 text-xs text-muted-foreground flex-1 break-words mb-2">{template.body_text}</p>
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-auto pt-1 border-t border-border/50">
                   <span>{template.language ?? 'en_US'}</span>
                   {/* Status is omitted on purpose — every template
                       shown here is already filtered to APPROVED,
