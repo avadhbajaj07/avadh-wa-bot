@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { loadAccountMetaCredentials } from '@/lib/flows/meta-send';
 import { sendMediaMessage, sendTextMessage, sendTemplateMessage } from '@/lib/whatsapp/meta-api';
 import { decrypt } from '@/lib/whatsapp/encryption';
+import { SHIKHA_ACCOUNT_IDS } from '@/lib/whatsapp/shikha';
 
 export const dynamic = 'force-dynamic';
 
@@ -125,21 +126,14 @@ async function handleSessionFlowSetup(request: Request) {
       }
     }
 
-    // Fallback: any active WhatsApp config
+    // Fallback: strictly Shikha Bajaj account IDs only (never non-Shikha accounts)
     if (!accountId) {
-      const { data: waConfig } = await admin
-        .from('whatsapp_config')
-        .select('account_id, user_id')
+      const { data: acc } = await admin
+        .from('accounts')
+        .select('id, owner_user_id')
+        .in('id', Array.from(SHIKHA_ACCOUNT_IDS))
         .limit(1)
         .maybeSingle();
-      if (waConfig) {
-        accountId = waConfig.account_id;
-        userId = userId || waConfig.user_id;
-      }
-    }
-
-    if (!accountId) {
-      const { data: acc } = await admin.from('accounts').select('id, owner_user_id').limit(1).maybeSingle();
       if (acc) {
         accountId = acc.id;
         userId = userId || acc.owner_user_id;
@@ -247,13 +241,9 @@ async function handleSessionFlowSetup(request: Request) {
     // 6. Create or update target Flow
     const flowKeywords = [
       'session details',
-      'session details (optional)',
+      'sessions details',
       'session detail',
-      'session',
-      'details',
-      'face yoga',
-      'faceyoga',
-      '22monthsfaceyoga',
+      'session details (optional)',
     ];
 
     if (!targetFlowId) {
@@ -268,7 +258,7 @@ async function handleSessionFlowSetup(request: Request) {
           trigger_type: 'keyword',
           trigger_config: {
             keywords: flowKeywords,
-            match_type: 'contains',
+            match_type: 'exact',
             case_sensitive: false,
           },
           entry_node_id: 'start_1',
@@ -290,7 +280,7 @@ async function handleSessionFlowSetup(request: Request) {
           trigger_type: 'keyword',
           trigger_config: {
             keywords: flowKeywords,
-            match_type: 'contains',
+            match_type: 'exact',
             case_sensitive: false,
           },
           entry_node_id: 'start_1',
