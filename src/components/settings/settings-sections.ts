@@ -12,6 +12,7 @@ import {
   UsersRound,
   Zap,
   Wallet,
+  Ban,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -34,6 +35,7 @@ export const SETTINGS_SECTIONS = [
   'templates',
   'quick-replies',
   'fields',
+  'exclusions',
   'deals',
   'members',
   'api',
@@ -62,6 +64,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   templates: { id: 'templates', label: 'Templates', icon: FileText, group: 'workspace' },
   'quick-replies': { id: 'quick-replies', label: 'Quick replies', icon: Zap, group: 'workspace' },
   fields: { id: 'fields', label: 'Fields & tags', icon: Tags, group: 'workspace' },
+  exclusions: { id: 'exclusions', label: 'DND / Exclusions', icon: Ban, group: 'workspace' },
   deals: { id: 'deals', label: 'Deals & currency', icon: Coins, group: 'workspace' },
   members: { id: 'members', label: 'Team members', icon: UsersRound, group: 'workspace' },
   api: { id: 'api', label: 'API keys', icon: KeyRound, group: 'workspace' },

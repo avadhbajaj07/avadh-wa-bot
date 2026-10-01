@@ -327,6 +327,28 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       contacts = contacts.filter((c) => !excludedIds.has(c.id));
     }
 
+    // Apply broadcast exclusion list (DND numbers)
+    if (accountId) {
+      const { data: exclusionRows } = await supabase
+        .from('broadcast_exclusions')
+        .select('phone_normalized')
+        .eq('account_id', accountId);
+      if (exclusionRows && exclusionRows.length > 0) {
+        const excludedPhones = new Set(
+          exclusionRows.map((r) => r.phone_normalized).filter(Boolean)
+        );
+        const beforeCount = contacts.length;
+        contacts = contacts.filter((c) => {
+          const normalized = (c.phone_normalized || c.phone.replace(/\D/g, ''));
+          return !excludedPhones.has(normalized);
+        });
+        const excludedCount = beforeCount - contacts.length;
+        if (excludedCount > 0) {
+          console.log(`[broadcast] Excluded ${excludedCount} contacts from DND list`);
+        }
+      }
+    }
+
     return contacts;
   }
 
