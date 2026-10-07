@@ -272,7 +272,9 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { phone_number_id, waba_id, access_token, verify_token, pin } = body
+    const { access_token, verify_token, pin } = body
+    const phone_number_id = typeof body.phone_number_id === 'string' ? body.phone_number_id.trim() : body.phone_number_id
+    const waba_id = typeof body.waba_id === 'string' ? body.waba_id.trim() : body.waba_id
 
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
