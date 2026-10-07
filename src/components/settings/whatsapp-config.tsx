@@ -263,16 +263,11 @@ export function WhatsAppConfig() {
   }
 
   async function handleSave() {
-    if (!phoneNumberId.trim()) {
+    const cleanPhoneId = phoneNumberId.replace(/\D/g, '');
+    const cleanWabaId = wabaId.replace(/\D/g, '');
+
+    if (!cleanPhoneId) {
       toast.error(t('phoneNumberIdRequired'));
-      return;
-    }
-    if (!META_ID_RE.test(phoneNumberId.trim())) {
-      toast.error(t('phoneNumberIdNotNumeric'));
-      return;
-    }
-    if (wabaId.trim() && !META_ID_RE.test(wabaId.trim())) {
-      toast.error(t('wabaIdNotNumeric'));
       return;
     }
     if (!config && (!accessToken.trim() || !tokenEdited)) {
@@ -283,17 +278,10 @@ export function WhatsAppConfig() {
     try {
       setSaving(true);
 
-      // Always POST through the API — it verifies with Meta and encrypts
-      // the access_token server-side with ENCRYPTION_KEY. Skipping this
-      // and writing direct to Supabase stores the token in plaintext,
-      // which then fails decryption on every subsequent health check.
       const payload: Record<string, unknown> = {
-        phone_number_id: phoneNumberId.trim(),
-        waba_id: wabaId.trim() || null,
+        phone_number_id: cleanPhoneId,
+        waba_id: cleanWabaId || null,
         verify_token: verifyToken.trim() || null,
-        // Optional — only sent when the user filled it in. The server
-        // requires it on first save or when changing numbers; for a
-        // simple token rotation, leaving it blank skips re-register.
         pin: pin.trim() || null,
       };
 
