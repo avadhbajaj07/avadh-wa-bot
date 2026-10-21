@@ -364,7 +364,12 @@ async function findEntryFlow(
   const typed = flows as FlowRow[];
   for (const flow of typed) {
     if (flow.trigger_type === "keyword") {
-      const cfg = flow.trigger_config as KeywordTriggerConfig;
+      const cfg = flow.trigger_config as KeywordTriggerConfig & {
+        also_trigger_on_first_inbound?: boolean;
+      };
+      if (cfg.also_trigger_on_first_inbound && isFirstInbound) {
+        return flow;
+      }
       if (candidates.some((text) => matchesKeywordTrigger(text, cfg))) {
         return flow;
       }
@@ -1053,6 +1058,29 @@ async function handleReplyForActiveRun(
   if (!currentNode) {
     await endRun(db, run.id, "failed", "current_node_not_found");
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
+  }
+
+  // Allow user to reset to main menu at any time if they type menu/start/restart/reset
+  if (message.kind === "text") {
+    const txt = message.text.trim().toLowerCase();
+    if (txt === "menu" || txt === "start" || txt === "restart" || txt === "reset") {
+      await endRun(db, run.id, "completed", "user_restart");
+      const flow = await loadFlow(db, run.flow_id);
+      if (flow && flow.entry_node_id) {
+        return startNewRun(
+          db,
+          flow,
+          {
+            accountId: run.account_id,
+            userId: run.user_id,
+            contactId: run.contact_id!,
+            conversationId: run.conversation_id!,
+            message,
+          },
+          nodes,
+        );
+      }
+    }
   }
 
   // Two ways a reply can advance:

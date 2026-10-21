@@ -1120,6 +1120,17 @@ async function processMessage(
   // runner has its own try/catch and never throws. Accounts with
   // no active flows take the runner's early-exit "no_match" path
   // basically for free (one indexed SELECT for the active run).
+  // Consider it a fresh session if it is their first-ever message OR
+  // if more than 24 hours have elapsed since the conversation's last message.
+  const lastCustomerMessageAt = conversation.last_message_at
+    ? new Date(conversation.last_message_at).getTime()
+    : 0
+  const hoursSinceLastMessage = lastCustomerMessageAt
+    ? (Date.now() - lastCustomerMessageAt) / (1000 * 60 * 60)
+    : 999
+  const isInactiveSession = hoursSinceLastMessage >= 24
+  const isFirstInboundOrInactive = isFirstInboundMessage || isInactiveSession
+
   const flowResult = await dispatchInboundToFlows({
     accountId,
     userId: configOwnerUserId,
@@ -1138,7 +1149,7 @@ async function processMessage(
             text: contentText ?? message.text?.body ?? '',
             meta_message_id: message.id,
           },
-    isFirstInboundMessage,
+    isFirstInboundMessage: isFirstInboundOrInactive,
   })
   const flowConsumed = flowResult.consumed
 
