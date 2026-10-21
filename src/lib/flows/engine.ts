@@ -38,7 +38,10 @@ import {
   engineSendInteractiveList,
   engineSendMedia,
   engineSendText,
+  loadAccountMetaCredentials,
 } from "./meta-send";
+import { sendTemplateMessage, sendTextMessage } from "@/lib/whatsapp/meta-api";
+import { createClient } from "@supabase/supabase-js";
 import { engineSendTemplate } from "@/lib/automations/meta-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import { addContactTagAndDispatch } from "@/lib/contacts/tag-events";
@@ -608,6 +611,144 @@ async function endRun(
     .eq("id", runId);
 }
 
+/**
+ * When an enquiry flow completes, dispatch instant WhatsApp notification
+ * to the hotel manager (+918878933778) and persist lead in Nakshatra Supabase.
+ */
+async function notifyManagerOnFlowCompletion(
+  db: AdminClient,
+  run: FlowRunRow,
+): Promise<void> {
+  try {
+    // 1. Fetch contact info
+    const { data: contact } = await db
+      .from("contacts")
+      .select("phone, name, first_name")
+      .eq("id", run.contact_id!)
+      .maybeSingle();
+    if (!contact?.phone) return;
+
+    // 2. Fetch recent interactive messages in this conversation to build summary
+    const { data: recentMsgs } = await db
+      .from("messages")
+      .select("content_type, content_text, interactive_reply_id, created_at")
+      .eq("conversation_id", run.conversation_id!)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    const interactiveTaps = (recentMsgs || [])
+      .filter((m) => m.content_type === "interactive" && m.content_text)
+      .map((m) => m.content_text.trim())
+      .reverse();
+
+    if (interactiveTaps.length === 0) return;
+
+    // Determine enquiry type and details
+    let enquiryType = "General Enquiry";
+    let leadType = "other";
+    const details = interactiveTaps.join(" ➔ ");
+
+    const checkStr = details.toLowerCase();
+    if (checkStr.includes("room")) {
+      enquiryType = "Room Booking";
+      leadType = "room";
+    } else if (
+      checkStr.includes("restaurant") ||
+      checkStr.includes("dine") ||
+      checkStr.includes("table")
+    ) {
+      enquiryType = "Restaurant Table";
+      leadType = "restaurant";
+    } else if (
+      checkStr.includes("banquet") ||
+      checkStr.includes("wedding") ||
+      checkStr.includes("party")
+    ) {
+      enquiryType = "Banquet & Events";
+      leadType = "banquet";
+    }
+
+    const guestPhone = contact.phone;
+    const guestPhoneDigits = guestPhone.replace(/\D/g, "");
+    const guestName =
+      contact.name || contact.first_name || `WhatsApp Guest (${guestPhone})`;
+
+    // Manager recipient number
+    const managerPhone = process.env.MANAGER_WHATSAPP_NUMBER || "+918878933778";
+    const cleanManager = managerPhone.startsWith("+")
+      ? managerPhone
+      : `+${managerPhone}`;
+
+    // 3. Load Meta credentials & dispatch notification
+    const { phoneNumberId, accessToken } = await loadAccountMetaCredentials(
+      db,
+      run.account_id,
+    );
+
+    // Attempt Utility template send first
+    let templateSent = false;
+    try {
+      await sendTemplateMessage({
+        phoneNumberId,
+        accessToken,
+        to: cleanManager,
+        templateName: "new_enquiry_manager",
+        language: "en_US",
+        params: [
+          guestName,
+          guestPhone,
+          enquiryType,
+          details.slice(0, 190),
+        ],
+      });
+      templateSent = true;
+    } catch (tplErr) {
+      console.warn(
+        "[flows] manager template send failed, will send text fallback:",
+        tplErr,
+      );
+    }
+
+    // Always send rich formatted summary text message as well
+    try {
+      await sendTextMessage({
+        phoneNumberId,
+        accessToken,
+        to: cleanManager,
+        text: `🏨 *New WhatsApp Lead — Nakshatra Hotel*\n\n👤 *Guest:* ${guestName}\n📱 *Phone:* ${guestPhone}\n🛎 *Category:* ${enquiryType}\n📋 *Details:* ${details}\n\n💬 *Chat with Guest:* https://wa.me/${guestPhoneDigits}`,
+      });
+    } catch (txtErr) {
+      if (!templateSent) {
+        console.error("[flows] direct manager text failed:", txtErr);
+      }
+    }
+
+    // 4. Save to Nakshatra Hotel leads database
+    try {
+      const nakshatraDb = createClient(
+        "https://hkrvzgxrydpwfheyvptk.supabase.co",
+        "sb_publishable_p7-hustKfGQFL1n9KoDQrw_TdaanBD1",
+      );
+      await nakshatraDb.from("leads").insert({
+        name: guestName,
+        phone_e164: guestPhone,
+        phone_digits: guestPhoneDigits,
+        type: leadType,
+        details: details,
+        status: "new",
+        source: "whatsapp_flow",
+        page_url: "whatsapp",
+        answers: { taps: interactiveTaps },
+        manager_notified_at: new Date().toISOString(),
+      });
+    } catch (leadDbErr) {
+      console.error("[flows] saving lead to Nakshatra DB failed:", leadDbErr);
+    }
+  } catch (err) {
+    console.error("[flows] notifyManagerOnFlowCompletion failed:", err);
+  }
+}
+
 // ============================================================
 // The synchronous advance loop. Walks through auto-advance nodes
 // until it hits one that suspends (send_buttons/send_list) or
@@ -912,6 +1053,7 @@ async function advanceFromNodeKey(
     if (node.node_type === "end") {
       await logEvent(db, run.id, "completed", node.node_key);
       await endRun(db, run.id, "completed", "end_node");
+      await notifyManagerOnFlowCompletion(db, run);
       return { outcome: "completed" };
     }
     // Unknown node type — shouldn't happen given the CHECK constraint.
