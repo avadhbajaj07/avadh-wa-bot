@@ -671,7 +671,11 @@ async function notifyManagerOnFlowCompletion(
     const guestPhone = contact.phone;
     const guestPhoneDigits = guestPhone.replace(/\D/g, "");
     const guestName =
-      contact.name || contact.first_name || `WhatsApp Guest (${guestPhone})`;
+      (typeof run.vars?.name === "string" && run.vars.name.trim()) ||
+      (typeof run.vars?.guest_name === "string" && run.vars.guest_name.trim()) ||
+      contact.name ||
+      contact.first_name ||
+      `WhatsApp Guest (${guestPhone})`;
 
     // Manager recipient number
     const managerPhone = process.env.MANAGER_WHATSAPP_NUMBER || "+918878933778";
@@ -1254,6 +1258,12 @@ async function handleReplyForActiveRun(
         })
         .eq("id", run.id);
       if (!capErr) {
+        if (cfg.var_key === "name" || cfg.var_key === "guest_name") {
+          await db
+            .from("contacts")
+            .update({ name: captured })
+            .eq("id", run.contact_id!);
+        }
         // Mirror the UPDATE in-memory so downstream interpolation in
         // the advance loop sees the captured var without us having to
         // re-SELECT the whole row.
