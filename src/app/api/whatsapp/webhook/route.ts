@@ -1198,11 +1198,20 @@ async function processMessage(
     }).catch((err) => console.error('[automations] dispatch failed:', err))
   }
 
-  // AI auto-reply disabled per user request ("stop ai automation")
-  // Both rule-based smart reply and LLM auto-reply are stopped.
-
-  // Flow and AI auto-replies stopped per user request ("stop the flow from all of the accounts").
-  // Flows now only run if an active flow exists in the DB and matches via standard flow engine.
+  // AI auto-reply. Runs only for plain-text inbound the deterministic
+  // flow runner did NOT consume (flows win over the LLM), and only when
+  // the account has enabled it. Awaited inside `after()` (same reason as
+  // the webhook dispatch below); `dispatchInboundToAiReply` owns its
+  // eligibility gates + try/catch and never throws.
+  if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
+    await dispatchInboundToAiReply({
+      accountId,
+      conversationId: conversation.id,
+      contactId: contactRecord.id,
+      configOwnerUserId,
+      inboundMessageId: message.id,
+    })
+  }
 
   // message.received webhook (public API). Awaited — not fire-and-forget
   // — because we're inside the route's `after()` block, which only keeps
