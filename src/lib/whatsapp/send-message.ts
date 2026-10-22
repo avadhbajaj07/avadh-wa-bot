@@ -274,7 +274,17 @@ export async function sendMessageToConversation(
     );
   }
 
-  const accessToken = decrypt(config.access_token);
+  let accessToken: string;
+  try {
+    accessToken = decrypt(config.access_token);
+  } catch (err) {
+    if (process.env.META_SYSTEM_USER_TOKEN) {
+      console.warn('[send-message] Token decryption failed, falling back to META_SYSTEM_USER_TOKEN');
+      accessToken = process.env.META_SYSTEM_USER_TOKEN.trim();
+    } else {
+      throw err;
+    }
+  }
 
   // Self-heal legacy CBC ciphertexts. Fire-and-forget; idempotent.
   if (isLegacyFormat(config.access_token)) {

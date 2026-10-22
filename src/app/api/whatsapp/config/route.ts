@@ -152,22 +152,33 @@ export async function GET() {
     }
 
     // Try to decrypt the stored token with the current ENCRYPTION_KEY.
-    // If this fails, the key changed (or was never consistent across envs).
+    // If this fails, try candidate keys, and if all fail, fall back to META_SYSTEM_USER_TOKEN
     let accessToken: string
     try {
       accessToken = decrypt(config.access_token)
     } catch (err) {
-      console.error('[whatsapp/config GET] Token decryption failed:', err)
-      return NextResponse.json(
-        {
-          connected: false,
-          reason: 'token_corrupted',
-          needs_reset: true,
-          message:
-            'The stored access token cannot be decrypted with the current ENCRYPTION_KEY. This usually means the key changed, or it differs between environments (local vs Hostinger vs Vercel). Click "Reset Configuration" below, then re-save.',
-        },
-        { status: 200 }
-      )
+      if (process.env.META_SYSTEM_USER_TOKEN) {
+        console.warn('[whatsapp/config GET] Token decryption failed, auto-healing with META_SYSTEM_USER_TOKEN')
+        accessToken = process.env.META_SYSTEM_USER_TOKEN.trim()
+        try {
+          const reencrypted = encrypt(accessToken)
+          await supabaseAdmin().from('whatsapp_config').update({ access_token: reencrypted }).eq('account_id', accountId)
+        } catch (healErr) {
+          console.warn('[whatsapp/config GET] Auto-heal token save error:', healErr)
+        }
+      } else {
+        console.error('[whatsapp/config GET] Token decryption failed:', err)
+        return NextResponse.json(
+          {
+            connected: false,
+            reason: 'token_corrupted',
+            needs_reset: true,
+            message:
+              'The stored access token cannot be decrypted with the current ENCRYPTION_KEY. This usually means the key changed, or it differs between environments (local vs Hostinger vs Vercel). Click "Reset Configuration" below, then re-save.',
+          },
+          { status: 200 }
+        )
+      }
     }
 
     // Validate credentials against Meta
