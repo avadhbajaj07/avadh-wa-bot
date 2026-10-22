@@ -277,6 +277,23 @@ export async function POST(request: Request) {
     const waba_id = typeof body.waba_id === 'string' ? body.waba_id.trim() : body.waba_id
 
     let access_token = typeof body.access_token === 'string' ? body.access_token.trim() : body.access_token
+
+    if (!access_token) {
+      const { data: existingRow } = await supabaseAdmin()
+        .from('whatsapp_config')
+        .select('access_token')
+        .eq('account_id', accountId)
+        .maybeSingle()
+
+      if (existingRow?.access_token) {
+        try {
+          access_token = decrypt(existingRow.access_token)
+        } catch (decryptErr) {
+          console.warn('[whatsapp/config POST] Could not decrypt existing token:', decryptErr)
+        }
+      }
+    }
+
     if (!access_token && process.env.META_SYSTEM_USER_TOKEN) {
       access_token = process.env.META_SYSTEM_USER_TOKEN.trim()
     }

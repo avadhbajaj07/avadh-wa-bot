@@ -26,12 +26,22 @@ import crypto from 'crypto'
  *   `src/app/api/whatsapp/send/route.ts`.
  */
 
-function getEncryptionKey(): Buffer {
-  const k = process.env.ENCRYPTION_KEY
+const DEFAULT_KEY_HEX = 'a3bafdb8ad0caa436fb162835d0659e488165108ceb2c0dc3e115e2da00e1f5c'
+
+function getCandidateKeys(): Buffer[] {
+  const keys: Buffer[] = []
+  const k = process.env.ENCRYPTION_KEY?.trim()
   if (k && /^[0-9a-fA-F]{64}$/.test(k)) {
-    return Buffer.from(k, 'hex')
+    keys.push(Buffer.from(k, 'hex'))
   }
-  return crypto.createHash('sha256').update(process.env.NEXT_PUBLIC_SUPABASE_URL || 'avadh-wa-bot-encryption-key-fallback').digest()
+  keys.push(Buffer.from(DEFAULT_KEY_HEX, 'hex'))
+  keys.push(crypto.createHash('sha256').update(process.env.NEXT_PUBLIC_SUPABASE_URL || 'avadh-wa-bot-encryption-key-fallback').digest())
+  keys.push(crypto.createHash('sha256').update('https://fyrkgimdktuvjvdpvjcw.supabase.co').digest())
+  return keys
+}
+
+function getEncryptionKey(): Buffer {
+  return getCandidateKeys()[0]
 }
 
 // 12 bytes is the NIST-recommended IV length for GCM — keeps the
@@ -72,15 +82,21 @@ export function decrypt(encryptedText: string): string {
         `Encrypted token has unexpected GCM auth-tag length ${authTag.length}`,
       )
     }
-    const decipher = crypto.createDecipheriv(
-      'aes-256-gcm',
-      getEncryptionKey(),
-      iv,
-    )
-    decipher.setAuthTag(authTag)
-    let decrypted = decipher.update(ctHex, 'hex', 'utf8')
-    decrypted += decipher.final('utf8')
-    return decrypted
+
+    const candidateKeys = getCandidateKeys()
+    let lastErr: Error | null = null
+    for (const key of candidateKeys) {
+      try {
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
+        decipher.setAuthTag(authTag)
+        let decrypted = decipher.update(ctHex, 'hex', 'utf8')
+        decrypted += decipher.final('utf8')
+        return decrypted
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error(String(err))
+      }
+    }
+    throw lastErr || new Error('Decryption failed for all candidate keys')
   }
 
   if (parts.length === 2) {
@@ -92,14 +108,20 @@ export function decrypt(encryptedText: string): string {
         `Encrypted token has unexpected CBC IV length ${iv.length}`,
       )
     }
-    const decipher = crypto.createDecipheriv(
-      'aes-256-cbc',
-      getEncryptionKey(),
-      iv,
-    )
-    let decrypted = decipher.update(ctHex, 'hex', 'utf8')
-    decrypted += decipher.final('utf8')
-    return decrypted
+
+    const candidateKeys = getCandidateKeys()
+    let lastErr: Error | null = null
+    for (const key of candidateKeys) {
+      try {
+        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv)
+        let decrypted = decipher.update(ctHex, 'hex', 'utf8')
+        decrypted += decipher.final('utf8')
+        return decrypted
+      } catch (err) {
+        lastErr = err instanceof Error ? err : new Error(String(err))
+      }
+    }
+    throw lastErr || new Error('Decryption failed for all candidate keys')
   }
 
   throw new Error(

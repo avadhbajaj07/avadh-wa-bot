@@ -287,15 +287,9 @@ export function WhatsAppConfig() {
 
       if (tokenEdited && accessToken !== MASKED_TOKEN && accessToken.trim()) {
         payload.access_token = accessToken.trim();
-      } else if (config) {
-        // Existing config — reuse stored encrypted token by decrypting on the
-        // server. But our POST handler requires an access_token to verify
-        // with Meta. If the user didn't change the token, we need to signal
-        // that. Simplest: require token re-entry if they're updating.
-        toast.error(t('reenterAccessToken'));
-        setSaving(false);
-        return;
       }
+      // If token wasn't edited, payload.access_token is omitted so the backend
+      // reuses the decrypted stored token or server system token.
 
       const res = await fetch('/api/whatsapp/config', {
         method: 'POST',
