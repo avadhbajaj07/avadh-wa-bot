@@ -646,26 +646,52 @@ async function notifyManagerOnFlowCompletion(
     // Determine enquiry type and details
     let enquiryType = "General Enquiry";
     let leadType = "other";
-    const details = interactiveTaps.join(" ➔ ");
+    const details = interactiveTaps.length > 0 ? interactiveTaps.join(" ➔ ") : "Standard Enquiry";
+
+    const { data: accountRow } = await db
+      .from("accounts")
+      .select("name")
+      .eq("id", run.account_id)
+      .maybeSingle();
+
+    const isSchool =
+      (accountRow?.name || "").toLowerCase().includes("school") ||
+      (accountRow?.name || "").toLowerCase().includes("gokuldas");
 
     const checkStr = details.toLowerCase();
-    if (checkStr.includes("room")) {
-      enquiryType = "Room Booking";
-      leadType = "room";
-    } else if (
-      checkStr.includes("restaurant") ||
-      checkStr.includes("dine") ||
-      checkStr.includes("table")
-    ) {
-      enquiryType = "Restaurant Table";
-      leadType = "restaurant";
-    } else if (
-      checkStr.includes("banquet") ||
-      checkStr.includes("wedding") ||
-      checkStr.includes("party")
-    ) {
-      enquiryType = "Banquet & Events";
-      leadType = "banquet";
+    if (isSchool) {
+      if (checkStr.includes("admission") || checkStr.includes("class") || checkStr.includes("primary")) {
+        enquiryType = "Admission Enquiry";
+        leadType = "admission";
+      } else if (checkStr.includes("fee") || checkStr.includes("account") || checkStr.includes("receipt")) {
+        enquiryType = "Fee & Account";
+        leadType = "fee";
+      } else if (checkStr.includes("hostel") || checkStr.includes("campus") || checkStr.includes("visit") || checkStr.includes("sports")) {
+        enquiryType = "Campus & Hostel";
+        leadType = "campus";
+      } else {
+        enquiryType = "School Enquiry";
+        leadType = "school";
+      }
+    } else {
+      if (checkStr.includes("room")) {
+        enquiryType = "Room Booking";
+        leadType = "room";
+      } else if (
+        checkStr.includes("restaurant") ||
+        checkStr.includes("dine") ||
+        checkStr.includes("table")
+      ) {
+        enquiryType = "Restaurant Table";
+        leadType = "restaurant";
+      } else if (
+        checkStr.includes("banquet") ||
+        checkStr.includes("wedding") ||
+        checkStr.includes("party")
+      ) {
+        enquiryType = "Banquet & Events";
+        leadType = "banquet";
+      }
     }
 
     const guestPhone = contact.phone;
@@ -689,6 +715,8 @@ async function notifyManagerOnFlowCompletion(
       run.account_id,
     );
 
+    const templateNameToUse = isSchool ? "new_enquiry_school" : "new_enquiry_manager";
+
     // Attempt Utility template send first
     let templateSent = false;
     try {
@@ -696,7 +724,7 @@ async function notifyManagerOnFlowCompletion(
         phoneNumberId,
         accessToken,
         to: cleanManager,
-        templateName: "new_enquiry_manager",
+        templateName: templateNameToUse,
         language: "en_US",
         params: [
           guestName,
@@ -708,18 +736,23 @@ async function notifyManagerOnFlowCompletion(
       templateSent = true;
     } catch (tplErr) {
       console.warn(
-        "[flows] manager template send failed, will send text fallback:",
+        `[flows] manager template (${templateNameToUse}) send failed, will send text fallback:`,
         tplErr,
       );
     }
 
     // Always send rich formatted summary text message as well
+    const header = isSchool
+      ? "🏫 *New WhatsApp Enquiry — Gokuldas Public School*"
+      : "🏨 *New WhatsApp Lead — Nakshatra Hotel*";
+    const roleLabel = isSchool ? "Parent / Student" : "Guest";
+
     try {
       await sendTextMessage({
         phoneNumberId,
         accessToken,
         to: cleanManager,
-        text: `🏨 *New WhatsApp Lead — Nakshatra Hotel*\n\n👤 *Guest:* ${guestName}\n📱 *Phone:* ${guestPhone}\n🛎 *Category:* ${enquiryType}\n📋 *Details:* ${details}\n\n💬 *Chat with Guest:* https://wa.me/${guestPhoneDigits}`,
+        text: `${header}\n\n👤 *${roleLabel}:* ${guestName}\n📱 *Phone:* ${guestPhone}\n🛎 *Category:* ${enquiryType}\n📋 *Details:* ${details}\n\n💬 *Chat:* https://wa.me/${guestPhoneDigits}`,
       });
     } catch (txtErr) {
       if (!templateSent) {
@@ -727,26 +760,28 @@ async function notifyManagerOnFlowCompletion(
       }
     }
 
-    // 4. Save to Nakshatra Hotel leads database
-    try {
-      const nakshatraDb = createClient(
-        "https://hkrvzgxrydpwfheyvptk.supabase.co",
-        "sb_publishable_p7-hustKfGQFL1n9KoDQrw_TdaanBD1",
-      );
-      await nakshatraDb.from("leads").insert({
-        name: guestName,
-        phone_e164: guestPhone,
-        phone_digits: guestPhoneDigits,
-        type: leadType,
-        details: details,
-        status: "new",
-        source: "whatsapp_flow",
-        page_url: "whatsapp",
-        answers: { taps: interactiveTaps },
-        manager_notified_at: new Date().toISOString(),
-      });
-    } catch (leadDbErr) {
-      console.error("[flows] saving lead to Nakshatra DB failed:", leadDbErr);
+    // 4. Save to Nakshatra Hotel leads database (if Nakshatra)
+    if (!isSchool) {
+      try {
+        const nakshatraDb = createClient(
+          "https://hkrvzgxrydpwfheyvptk.supabase.co",
+          "sb_publishable_p7-hustKfGQFL1n9KoDQrw_TdaanBD1",
+        );
+        await nakshatraDb.from("leads").insert({
+          name: guestName,
+          phone_e164: guestPhone,
+          phone_digits: guestPhoneDigits,
+          type: leadType,
+          details: details,
+          status: "new",
+          source: "whatsapp_flow",
+          page_url: "whatsapp",
+          answers: { taps: interactiveTaps },
+          manager_notified_at: new Date().toISOString(),
+        });
+      } catch (leadDbErr) {
+        console.error("[flows] saving lead to Nakshatra DB failed:", leadDbErr);
+      }
     }
   } catch (err) {
     console.error("[flows] notifyManagerOnFlowCompletion failed:", err);
