@@ -272,13 +272,18 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { access_token, verify_token, pin } = body
+    const { verify_token, pin } = body
     const phone_number_id = typeof body.phone_number_id === 'string' ? body.phone_number_id.trim() : body.phone_number_id
     const waba_id = typeof body.waba_id === 'string' ? body.waba_id.trim() : body.waba_id
 
+    let access_token = typeof body.access_token === 'string' ? body.access_token.trim() : body.access_token
+    if (!access_token && process.env.META_SYSTEM_USER_TOKEN) {
+      access_token = process.env.META_SYSTEM_USER_TOKEN.trim()
+    }
+
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
-        { error: 'access_token and phone_number_id are required' },
+        { error: 'phone_number_id is required, and access_token was not provided nor configured on server' },
         { status: 400 }
       )
     }
