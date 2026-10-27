@@ -52,6 +52,10 @@ export interface AudienceConfig {
   applyTagIds?: string[];
   /** Contacts carrying any of these tags are subtracted from the result. */
   excludeTagIds?: string[];
+  /** Automatically exclude contacts that are already saved in the database to save credits. */
+  excludeExistingContacts?: boolean;
+  /** Automatically exclude contacts that have already been messaged in past broadcasts. */
+  excludePreviouslyMessaged?: boolean;
 }
 
 /**
@@ -312,7 +316,9 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       contacts = await upsertCsvContacts(
         supabase,
         audience.csvContacts,
-        audience.applyTagIds
+        audience.applyTagIds,
+        audience.excludeExistingContacts ?? true,
+        audience.excludePreviouslyMessaged ?? true,
       );
     }
 
@@ -361,6 +367,8 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
     supabase: ReturnType<typeof createClient>,
     csvRows: BroadcastCsvContact[],
     applyTagIds?: string[],
+    excludeExistingContacts: boolean = true,
+    excludePreviouslyMessaged: boolean = true,
   ): Promise<Contact[]> {
     if (csvRows.length === 0) return [];
 
@@ -401,13 +409,27 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
     }
 
     const byKey = new Map<string, Contact>();
+    const existingKeySet = new Set<string>();
     for (const c of (existing ?? []) as Contact[]) {
       const key = normalizeKey(c.phone ?? '');
-      if (key) byKey.set(key, c);
+      if (key) {
+        byKey.set(key, c);
+        existingKeySet.add(key);
+      }
     }
 
-    // Insert only missing contacts
-    const missing = keys
+    // Filter target keys if excluding existing saved contacts
+    let targetKeys = keys;
+    if (excludeExistingContacts) {
+      targetKeys = targetKeys.filter((k) => !existingKeySet.has(k));
+      const excludedExistingCount = keys.length - targetKeys.length;
+      if (excludedExistingCount > 0) {
+        console.log(`[broadcast] Excluded ${excludedExistingCount} saved/existing contacts from broadcast audience.`);
+      }
+    }
+
+    // Insert only missing contacts (for target keys)
+    const missing = targetKeys
       .filter((k) => !byKey.has(k))
       .map((k) => uniqueByKey.get(k)!)
       .map((row) => {
@@ -446,10 +468,37 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       }
     }
 
-    // Preserve input order
-    const resolvedContacts = keys
+    // Preserve input order for target keys
+    let resolvedContacts = targetKeys
       .map((k) => byKey.get(k))
       .filter((c): c is Contact => Boolean(c));
+
+    // Exclude previously broadcasted contacts if enabled
+    if (excludePreviouslyMessaged && resolvedContacts.length > 0) {
+      const contactIds = resolvedContacts.map((c) => c.id);
+      const previouslySentIds = new Set<string>();
+
+      const CHUNK = 100;
+      for (let i = 0; i < contactIds.length; i += CHUNK) {
+        const slice = contactIds.slice(i, i + CHUNK);
+        const { data: pastRecipients } = await supabase
+          .from('broadcast_recipients')
+          .select('contact_id')
+          .in('contact_id', slice);
+
+        if (pastRecipients) {
+          for (const r of pastRecipients) {
+            if (r.contact_id) previouslySentIds.add(r.contact_id);
+          }
+        }
+      }
+
+      if (previouslySentIds.size > 0) {
+        const beforeCount = resolvedContacts.length;
+        resolvedContacts = resolvedContacts.filter((c) => !previouslySentIds.has(c.id));
+        console.log(`[broadcast] Excluded ${beforeCount - resolvedContacts.length} previously broadcasted contacts.`);
+      }
+    }
 
     // Auto-accept and assign tags: user-selected applyTagIds + row-level tags from CSV
     try {

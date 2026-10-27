@@ -1,14 +1,18 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import {
   parseBroadcastCsv,
   BroadcastCsvContact,
   extractTemplatePlaceholders,
 } from '@/lib/broadcast-csv';
 import { parsePastedNumbers } from '@/lib/contacts/parse-pasted-numbers';
+import { createClient } from '@/lib/supabase/client';
+import { normalizeKey } from '@/lib/contacts/dedupe';
+import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import {
   Users,
@@ -21,6 +25,8 @@ import {
   Check,
   Sparkles,
   CheckCircle2,
+  ShieldCheck,
+  Coins,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import type { MessageTemplate } from '@/types';
@@ -39,6 +45,10 @@ export interface AudienceConfig {
   csvColumns?: string[];
   applyTagIds?: string[];
   excludeTagIds?: string[];
+  /** Automatically exclude contacts that are already saved in the database to save credits. */
+  excludeExistingContacts?: boolean;
+  /** Automatically exclude contacts that have already been messaged in past broadcasts. */
+  excludePreviouslyMessaged?: boolean;
 }
 
 interface Step2Props {
@@ -117,6 +127,50 @@ export function Step2SelectAudience({
     () => parsePastedNumbers(pastedText),
     [pastedText]
   );
+
+  const [existingSavedCount, setExistingSavedCount] = useState<number>(0);
+  const [checkingExisting, setCheckingExisting] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function checkExistingContacts() {
+      if (!audience.csvContacts || audience.csvContacts.length === 0) {
+        setExistingSavedCount(0);
+        return;
+      }
+      setCheckingExisting(true);
+      try {
+        const supabase = createClient();
+        const keys = audience.csvContacts
+          .map((c) => {
+            const formatted = formatPhoneNumber(c.phone) || c.phone;
+            return normalizeKey(formatted);
+          })
+          .filter(Boolean) as string[];
+
+        const uniqueKeys = [...new Set(keys)];
+        let existingFound = 0;
+        const CHUNK = 100;
+        for (let i = 0; i < uniqueKeys.length; i += CHUNK) {
+          const slice = uniqueKeys.slice(i, i + CHUNK);
+          const { count } = await supabase
+            .from('contacts')
+            .select('*', { count: 'exact', head: true })
+            .in('phone_normalized', slice);
+          if (count) existingFound += count;
+        }
+        if (active) setExistingSavedCount(existingFound);
+      } catch (err) {
+        console.error('[step2] Error checking existing contacts:', err);
+      } finally {
+        if (active) setCheckingExisting(false);
+      }
+    }
+    checkExistingContacts();
+    return () => {
+      active = false;
+    };
+  }, [audience.csvContacts]);
 
   function handleCsvChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -633,6 +687,85 @@ export function Step2SelectAudience({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Credit Saver & Contact Deduplication Card */}
+      {(audience.type === 'csv' || audience.type === 'paste') && csvCount > 0 && (
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-emerald-500" />
+              <h4 className="text-sm font-semibold text-foreground">
+                Credit Saver & Smart De-duplication
+              </h4>
+            </div>
+            <Badge variant="outline" className="text-emerald-500 border-emerald-500/30 text-[11px] font-medium bg-emerald-500/10 gap-1">
+              <Coins className="h-3 w-3" />
+              Credit Protection
+            </Badge>
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Save your WhatsApp marketing conversation fees. Numbers already saved in your contacts or chats can be contacted directly from your WhatsApp Business app for free.
+          </p>
+
+          <div className="space-y-2 pt-1">
+            {/* Toggle 1: Exclude Saved / Existing Contacts */}
+            <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/80 p-3">
+              <div className="space-y-0.5 pr-4">
+                <label htmlFor="exclude-existing" className="text-xs font-medium text-foreground cursor-pointer flex items-center gap-1.5">
+                  <span>Exclude Existing / Saved Contacts</span>
+                  <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal bg-emerald-500/10 text-emerald-400">Recommended</Badge>
+                </label>
+                <p className="text-[11px] text-muted-foreground">
+                  Remove numbers already in your contacts or chats so you do not pay broadcast credits for existing contacts.
+                </p>
+              </div>
+              <Switch
+                id="exclude-existing"
+                checked={audience.excludeExistingContacts ?? true}
+                onCheckedChange={(checked) => onUpdate({ ...audience, excludeExistingContacts: checked })}
+              />
+            </div>
+
+            {/* Toggle 2: Exclude Previously Broadcasted */}
+            <div className="flex items-center justify-between rounded-lg border border-border/60 bg-background/80 p-3">
+              <div className="space-y-0.5 pr-4">
+                <label htmlFor="exclude-broadcasted" className="text-xs font-medium text-foreground cursor-pointer flex items-center gap-1.5">
+                  <span>Exclude Previously Broadcasted Numbers</span>
+                </label>
+                <p className="text-[11px] text-muted-foreground">
+                  Skip contacts who already received a campaign from this account so you never pay twice.
+                </p>
+              </div>
+              <Switch
+                id="exclude-broadcasted"
+                checked={audience.excludePreviouslyMessaged ?? true}
+                onCheckedChange={(checked) => onUpdate({ ...audience, excludePreviouslyMessaged: checked })}
+              />
+            </div>
+          </div>
+
+          {/* Live Audience Breakdown */}
+          <div className="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-3">
+              <span>Total in list: <strong className="font-mono text-foreground">{csvCount.toLocaleString()}</strong></span>
+              {(audience.excludeExistingContacts ?? true) && (
+                <span className="text-emerald-400">
+                  Existing saved: <strong className="font-mono">-{checkingExisting ? '...' : existingSavedCount.toLocaleString()}</strong>
+                </span>
+              )}
+            </div>
+            <div className="text-right">
+              <span>Net to broadcast: <strong className="font-mono text-primary font-semibold">
+                {Math.max(
+                  0,
+                  csvCount - ((audience.excludeExistingContacts ?? true) ? existingSavedCount : 0)
+                ).toLocaleString()}
+              </strong></span>
+            </div>
+          </div>
         </div>
       )}
 

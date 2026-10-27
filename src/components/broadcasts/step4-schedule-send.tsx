@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { normalizeKey } from '@/lib/contacts/dedupe';
+import { formatPhoneNumber } from '@/lib/contacts/parse-pasted-numbers';
 import { MessageTemplate, Tag } from '@/types';
 import { AudienceConfig } from '@/components/broadcasts/step2-select-audience';
 import { Button } from '@/components/ui/button';
@@ -71,6 +73,7 @@ export function Step4ScheduleSend({
   const t = useTranslations('Broadcasts.wizard');
   const [showConfirm, setShowConfirm] = useState(false);
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
+  const [csvExistingExcluded, setCsvExistingExcluded] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
 
   const [testPhone, setTestPhone] = useState('');
@@ -192,6 +195,29 @@ export function Step4ScheduleSend({
           baseContactIds = uniqueIds;
         } else if ((audience.type === 'csv' || audience.type === 'paste') && audience.csvContacts) {
           baseCount = audience.csvContacts.length;
+
+          let csvExcluded = 0;
+          if (audience.excludeExistingContacts !== false) {
+            const keys = audience.csvContacts
+              .map((c) => {
+                const formatted = formatPhoneNumber(c.phone) || c.phone;
+                return normalizeKey(formatted);
+              })
+              .filter(Boolean) as string[];
+            const uniqueKeys = [...new Set(keys)];
+
+            const CHUNK = 100;
+            for (let i = 0; i < uniqueKeys.length; i += CHUNK) {
+              const slice = uniqueKeys.slice(i, i + CHUNK);
+              const { count } = await supabase
+                .from('contacts')
+                .select('*', { count: 'exact', head: true })
+                .in('phone_normalized', slice);
+              if (count) csvExcluded += count;
+            }
+            baseCount = Math.max(0, baseCount - csvExcluded);
+          }
+          setCsvExistingExcluded(csvExcluded);
         }
 
         if (baseContactIds.length > 0) {
@@ -330,10 +356,17 @@ export function Step4ScheduleSend({
               {loadingReach ? (
                 <Loader2 className="h-3 w-3 animate-spin text-primary" />
               ) : (
-                <>
-                  <Users className="h-3.5 w-3.5 text-primary" />
-                  <p className="font-bold text-foreground text-base">{estimatedReach.toLocaleString()}</p>
-                </>
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <Users className="h-3.5 w-3.5 text-primary" />
+                    <p className="font-bold text-foreground text-base">{estimatedReach.toLocaleString()}</p>
+                  </div>
+                  {csvExistingExcluded > 0 && (
+                    <Badge variant="outline" className="text-[10px] text-emerald-400 border-emerald-500/30 bg-emerald-500/10 font-normal">
+                      {csvExistingExcluded} saved contacts excluded
+                    </Badge>
+                  )}
+                </div>
               )}
             </div>
           </div>
