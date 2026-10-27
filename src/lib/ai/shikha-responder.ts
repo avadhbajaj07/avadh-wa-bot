@@ -1,10 +1,38 @@
 import { supabaseAdmin } from './admin-client'
-import { engineSendText } from '@/lib/flows/meta-send'
+import { engineSendMedia, engineSendText } from '@/lib/flows/meta-send'
+
+export const SHIKHA_FACE_YOGA_1MONTH_TEXT = `Face Yoga – 1 month With Shikha Bajaj
+Namaste 🙏
+
+Join me for a fun & simple 1 Month Face Yoga journey — ghar baithe, LIVE on Zoom! 🧘‍♀️
+
+✨ 22 Live Classes
+- Natural Glow
+- Firmer-looking Skin
+- Healthy & Fresh Look
+- Fine Lines ki appearance ko reduce karne mein help
+- Relaxed face + happy mood 
+
+🗓️ Starting 15th Nov.
+⏰ 6:30 – 7:00 PM
+⏰ 9:00 – 9:30 PM
+💻 Online on Zoom
+💰 Only ₹799/-
+
+No pressure, no complicated routine — bas 30 minutes for YOU! 
+Aaiye, saath mein Glow, Smile & Feel Beautiful karein! 🌷✨
+With Love,
+Shikha Bajaj
+
+with Registration link - https://rzp.io/rzp/facebs`
+
+export const SHIKHA_FACE_YOGA_AUDIO_URL = 'https://www.shikhabajaj.online/media/faceyoga-1month.ogg'
 
 export interface ShikhaReplyResult {
   handled: boolean
   replyText?: string
   unsubscribed?: boolean
+  sendVoice?: boolean
 }
 
 /**
@@ -38,7 +66,7 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Namaste! 🙏 Main Shikha Bajaj hoon, Certified Face Yoga & Natural Wellness Coach.\n\nHum ladies ke liye ek 5-Day Live Online Face Yoga Workshop conduct kar rahe hain jisme hum natural anti-aging, glowing skin aur double chin reduction ki simple exercises sikhate hain.\n\nWorkshop ki fees sirf ₹99 hai. Aap is link se details dekh kar register kar sakti hain:\n👉 https://rzp.io/rzp/shikha07',
+        'Namaste! 🙏 Main Shikha Bajaj hoon, Certified Face Yoga & Natural Wellness Coach.\n\nHum ladies ke liye 1 Month ka Live Online Face Yoga Program shuru kar rahe hain (Starting 15th Nov, 22 Live Classes on Zoom) jisme hum natural glowing skin, firmer skin aur fine lines reduction ki simple exercises sikhate hain.\n\nProgram ki fees sirf ₹799 hai. Aap is link se details dekh kar register kar sakti hain:\n👉 https://rzp.io/rzp/facebs',
     }
   }
 
@@ -50,7 +78,7 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Main Khargone (M.P.) se hoon! 😊 Lekin yeh 5-Day Workshop completely online live Zoom par hoti hai, toh aap apne ghar se aaram se kisi bhi shehar se join kar sakti hain!\n\nMorning aur Evening dono batches available hain. Fees sirf ₹99 hai:\n👉 https://rzp.io/rzp/shikha07',
+        'Main Khargone (M.P.) se hoon! 😊 Lekin yeh 1 Month Face Yoga Program completely online live Zoom par hoti hai, toh aap apne ghar se aaram se kisi bhi shehar se join kar sakti hain!\n\n🗓️ Starting: 15th Nov (22 Live Classes)\n⏰ Batches: 6:30 – 7:00 PM & 9:00 – 9:30 PM\n💰 Fees sirf ₹799 hai:\n👉 https://rzp.io/rzp/facebs',
     }
   }
 
@@ -64,7 +92,7 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Sorry agar aapko unexpected laga! 🙏 Actually humare wellness & yoga awareness campaigns ke through humara invitation aap tak pahuncha.\n\nAgar aapko Face Yoga me interest nahi hai toh bilkul koi baat nahi, main aapko disturb nahi karungi. Lekin agar aap daily 15-20 min me bina kisi chemical ke natural glowing skin aur face lift seekhna chahti hain, toh yeh 5-day live session sirf ₹99 me hai!\n\nAap yahan register kar sakti hain:\n👉 https://rzp.io/rzp/shikha07',
+        'Sorry agar aapko unexpected laga! 🙏 Actually humare wellness & yoga awareness campaigns ke through humara invitation aap tak pahuncha.\n\nAgar aapko Face Yoga me interest nahi hai toh bilkul koi baat nahi, main aapko disturb nahi karungi. Lekin agar aap daily 30 min me bina kisi chemical ke natural glowing skin seekhna chahti hain, toh yeh 1 Month Face Yoga journey (Starting 15th Nov, 22 Live Classes) sirf ₹799 me hai!\n\nAap yahan register kar sakti hain:\n👉 https://rzp.io/rzp/facebs',
     }
   }
 
@@ -76,7 +104,7 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Fees sirf ₹99/- hai poore 5 din ke live sessions ke liye! 🌸\n\nYeh sessions fully live hote hain (hum recording provide nahi karte hain, par aap apne end pe session record kar sakti hain).\n\nAap direct is link se register kar sakti hain:\n👉 https://rzp.io/rzp/shikha07',
+        'Fees sirf ₹799/- hai poore 1 month (22 Live Classes) ke liye! 🌸\n\n🗓️ Starting: 15th Nov\n⏰ Batches: 6:30 – 7:00 PM & 9:00 – 9:30 PM\n💻 Online on Zoom\n\nAap direct is link se register kar sakti hain:\n👉 https://rzp.io/rzp/facebs',
     }
   }
 
@@ -88,7 +116,7 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Session ke 2 batches available hain: Morning aur Evening! ⏰\n\nAap apni suvidha ke anusaar koi bhi batch attend kar sakti hain. Yeh session fully live hota hai (hum recording provide nahi karte, par aap apne end pe record kar sakti hain).\n\nFees sirf ₹99 hai. Register karne ke liye:\n👉 https://rzp.io/rzp/shikha07',
+        'Face Yoga 1 Month Program ke 2 batches available hain LIVE on Zoom! ⏰\n\n🗓️ Starting: 15th Nov (22 Live Classes)\n⏰ Batch 1: 6:30 – 7:00 PM\n⏰ Batch 2: 9:00 – 9:30 PM\n💰 Fees: Sirf ₹799/-\n\nAap apni suvidha ke anusaar koi bhi batch attend kar sakti hain. Register karne ke liye:\n👉 https://rzp.io/rzp/facebs',
     }
   }
 
@@ -101,7 +129,7 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Yeh raha registration link: 🌸\n👉 https://rzp.io/rzp/shikha07\n\nFees sirf ₹99 hai. Register karte hi aapko workshop ke WhatsApp group aur Zoom link ka access mil jayega!',
+        'Yeh raha registration link: 🌸\n👉 https://rzp.io/rzp/facebs\n\nFace Yoga 1 Month (Starting 15th Nov, 22 Live Classes on Zoom). Fees sirf ₹799 hai. Register karte hi aapko program ke WhatsApp group aur Zoom link ka access mil jayega!',
     }
   }
 
@@ -127,21 +155,22 @@ export function getShikhaReply(inboundText: string): ShikhaReplyResult {
     return {
       handled: true,
       replyText:
-        'Meri abhi koi evening ya extra classes nahi chal rahi hain. Abhi sirf Morning offline yoga class (Balaji Nagar turf par) aur yeh 5-day online Face Yoga workshop hi chal rahi hai. 😊',
+        'Meri abhi koi evening offline yoga class nahi chal rahi hai. Online Zoom par hamara Face Yoga 1 Month Program sham 6:30 – 7:00 PM aur raat 9:00 – 9:30 PM chalega (Starting 15th Nov). 😊\n\nRegistration link: https://rzp.io/rzp/facebs',
     }
   }
 
-  // 10. Detailed Session / What will be taught
+  // 10. Detailed Session / What will be taught / Session Details button
   const curriculumPatterns = [
+    'session detail', 'sessions detail', 'session details', 'sessions details',
     'kya sikhaye', 'kya sikhaya', 'kya hoga', 'workshop me kya', 'details kya hai',
     'kya details', 'session me kya', 'kya sikhne', 'content', 'syllabus', 'kya karwaoge',
-    'kya sikhate', 'recording'
+    'kya sikhate', 'recording', 'details'
   ]
   if (curriculumPatterns.some((p) => text.includes(p))) {
     return {
       handled: true,
-      replyText:
-        'Namaste! 🙏 Yeh jo program hai na, yeh 5 days ka hone wala hai jo kal se start ho raha hai.\n\nAur yeh paanch dino mein main:\n✨ Face oil ke sath practice karwaungi\n✨ Saath mein paani (water) & Spoons ke sath natural techniques\n✨ Anti-aging, dark circle, puffiness aur natural face cut\n\nAlmost 1 month ki exercises main aapko in 5 din mein hi seekha doongi, jisko fir aap ghar pe roz practice kar sakti hain! 🌸\n\n(Yeh sessions fully live hain, hum recording provide nahi karte hain, par aap apne end pe session record kar sakti hain).\n\nYeh 5 dino ka session only ₹99 mein hai. Register karne ke liye:\n👉 https://rzp.io/rzp/shikha07\n\n(Aur haan, agar aapko mera poster mila hai na, toh please isko zyada se zyada womens tak share karna aur ho sake toh status lagana! Thank you so much ❤️)',
+      sendVoice: true,
+      replyText: SHIKHA_FACE_YOGA_1MONTH_TEXT,
     }
   }
 
@@ -183,6 +212,23 @@ export async function dispatchShikhaSmartReply(args: {
   }
 
   try {
+    // If voice mail requested (e.g. Session Details / Curriculum inquiry), send voice mail first
+    if (match.sendVoice) {
+      try {
+        await engineSendMedia({
+          accountId,
+          userId: configOwnerUserId,
+          conversationId,
+          contactId: contactRecord.id,
+          kind: 'audio',
+          link: SHIKHA_FACE_YOGA_AUDIO_URL,
+          filename: 'faceyoga-1month.ogg',
+        })
+      } catch (audioErr) {
+        console.error('[shikha-smart-reply] Audio send error:', audioErr)
+      }
+    }
+
     await engineSendText({
       accountId,
       userId: configOwnerUserId,
