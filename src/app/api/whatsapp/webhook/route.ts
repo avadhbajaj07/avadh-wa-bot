@@ -1215,13 +1215,29 @@ async function processMessage(
   // the webhook dispatch below); `dispatchInboundToAiReply` owns its
   // eligibility gates + try/catch and never throws.
   if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
-    await dispatchInboundToAiReply({
-      accountId,
-      conversationId: conversation.id,
-      contactId: contactRecord.id,
-      configOwnerUserId,
-      inboundMessageId: message.id,
-    })
+    let shikhaHandled = false
+    if (accountId === '562e1add-b78d-4bdd-b710-cff227ba71dd') {
+      shikhaHandled = await dispatchShikhaSmartReply({
+        accountId,
+        conversationId: conversation.id,
+        contactRecord,
+        inboundText,
+        configOwnerUserId,
+      }).catch((err) => {
+        console.error('[shikha-responder] error:', err)
+        return false
+      })
+    }
+
+    if (!shikhaHandled) {
+      await dispatchInboundToAiReply({
+        accountId,
+        conversationId: conversation.id,
+        contactId: contactRecord.id,
+        configOwnerUserId,
+        inboundMessageId: message.id,
+      })
+    }
   }
 
   // message.received webhook (public API). Awaited — not fire-and-forget
