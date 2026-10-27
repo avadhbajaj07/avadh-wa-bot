@@ -20,7 +20,8 @@ Join me for a fun & simple 1 Month Face Yoga journey — ghar baithe, LIVE on Zo
 - Fine Lines ki appearance ko reduce karne mein help
 - Relaxed face + happy mood 
 
-🗓️ Starting 1st October
+🗓️ Starting 15th Nov.
+⏰ 6:30 – 7:00 PM
 ⏰ 9:00 – 9:30 PM
 💻 Online on Zoom
 💰 Only ₹799/-

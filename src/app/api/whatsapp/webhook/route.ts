@@ -20,6 +20,7 @@ import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { loadAccountMetaCredentials } from '@/lib/flows/meta-send'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchShikhaSmartReply } from '@/lib/ai/shikha-responder'
+import { isSessionDetailsClick, isShikhaBajajAccount } from '@/lib/whatsapp/shikha'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
   handleTemplateWebhookChange,
@@ -51,6 +52,33 @@ function supabaseAdmin() {
   }
   return _adminClient
 }
+
+const SHIKHA_FACE_YOGA_MESSAGE = `Face Yoga – 1 month With Shikha Bajaj
+Namaste 🙏
+
+Join me for a fun & simple 1 Month Face Yoga journey — ghar baithe, LIVE on Zoom! 🧘‍♀️
+
+✨ 22 Live Classes
+- Natural Glow
+- Firmer-looking Skin
+- Healthy & Fresh Look
+- Fine Lines ki appearance ko reduce karne mein help
+- Relaxed face + happy mood 
+
+🗓️ Starting 15th Nov.
+⏰ 6:30 – 7:00 PM
+⏰ 9:00 – 9:30 PM
+💻 Online on Zoom
+💰 Only ₹799/-
+
+No pressure, no complicated routine — bas 30 minutes for YOU! 
+Aaiye, saath mein Glow, Smile & Feel Beautiful karein! 🌷✨
+With Love,
+Shikha Bajaj
+
+with Registration link - https://rzp.io/rzp/facebs`
+
+const SHIKHA_AUDIO_URL = 'https://www.shikhabajaj.online/media/faceyoga-1month.ogg'
 
 interface WhatsAppMessage {
   id: string
@@ -1207,6 +1235,77 @@ async function processMessage(
         interactive_reply_id: interactiveReplyId ?? undefined,
       },
     }).catch((err) => console.error('[automations] dispatch failed:', err))
+  }
+
+  // Shikha Bajaj: Session Details button tap or exact text match
+  const isSessionDetails = isSessionDetailsClick({
+    messageType: message.type,
+    interactiveReplyId,
+    text: inboundText,
+  })
+
+  if (isSessionDetails && (await isShikhaBajajAccount(supabaseAdmin(), accountId))) {
+    try {
+      const { phoneNumberId, accessToken } = await loadAccountMetaCredentials(supabaseAdmin(), accountId)
+      const sendTarget = resolveContactSendTarget(contactRecord)
+      if (sendTarget) {
+        const to = sendTarget.target
+
+        // 1. Send Voice Note Audio
+        try {
+          const audioRes = await sendMediaMessage({
+            phoneNumberId,
+            accessToken,
+            to,
+            kind: 'audio',
+            link: SHIKHA_AUDIO_URL,
+          })
+          if (audioRes?.messageId) {
+            await supabaseAdmin().from('messages').insert({
+              conversation_id: conversation.id,
+              sender_type: 'bot',
+              content_type: 'audio',
+              media_url: SHIKHA_AUDIO_URL,
+              message_id: audioRes.messageId,
+              status: 'sent',
+            })
+          }
+        } catch (audioErr) {
+          console.error('[webhook] error sending face yoga audio:', audioErr)
+        }
+
+        // 2. Send Face Yoga details text message
+        try {
+          const textRes = await sendTextMessage({
+            phoneNumberId,
+            accessToken,
+            to,
+            text: SHIKHA_FACE_YOGA_MESSAGE,
+          })
+          if (textRes?.messageId) {
+            await supabaseAdmin().from('messages').insert({
+              conversation_id: conversation.id,
+              sender_type: 'bot',
+              content_type: 'text',
+              content_text: SHIKHA_FACE_YOGA_MESSAGE,
+              message_id: textRes.messageId,
+              status: 'sent',
+            })
+          }
+        } catch (textErr) {
+          console.error('[webhook] error sending face yoga text:', textErr)
+        }
+
+        await supabaseAdmin().from('conversations').update({
+          last_message_text: '[audio + text] Session Details sent',
+          last_message_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', conversation.id)
+      }
+    } catch (sessionErr) {
+      console.error('[webhook] session details dispatch error:', sessionErr)
+    }
+    return
   }
 
   // AI auto-reply. Runs only for plain-text inbound the deterministic
