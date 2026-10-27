@@ -19,7 +19,6 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { loadAccountMetaCredentials } from '@/lib/flows/meta-send'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
-import { dispatchShikhaSmartReply } from '@/lib/ai/shikha-responder'
 import { isSessionDetailsClick, isShikhaBajajAccount } from '@/lib/whatsapp/shikha'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
@@ -1310,33 +1309,18 @@ async function processMessage(
 
   // AI auto-reply. Runs only for plain-text inbound the deterministic
   // flow runner did NOT consume (flows win over the LLM), and only when
-  // the account has enabled it. Awaited inside `after()` (same reason as
-  // the webhook dispatch below); `dispatchInboundToAiReply` owns its
-  // eligibility gates + try/catch and never throws.
-  if (!flowConsumed && !interactiveReplyId && inboundText.trim()) {
-    let shikhaHandled = false
-    if (accountId === '562e1add-b78d-4bdd-b710-cff227ba71dd') {
-      shikhaHandled = await dispatchShikhaSmartReply({
-        accountId,
-        conversationId: conversation.id,
-        contactRecord,
-        inboundText,
-        configOwnerUserId,
-      }).catch((err) => {
-        console.error('[shikha-responder] error:', err)
-        return false
-      })
-    }
-
-    if (!shikhaHandled) {
-      await dispatchInboundToAiReply({
-        accountId,
-        conversationId: conversation.id,
-        contactId: contactRecord.id,
-        configOwnerUserId,
-        inboundMessageId: message.id,
-      })
-    }
+  // the account has enabled it.
+  // NOTE: Strictly disabled for Shikha Bajaj accounts per user instructions
+  // so the AI does not automatically chat with clients.
+  const isShikha = await isShikhaBajajAccount(supabaseAdmin(), accountId)
+  if (!flowConsumed && !interactiveReplyId && inboundText.trim() && !isShikha) {
+    await dispatchInboundToAiReply({
+      accountId,
+      conversationId: conversation.id,
+      contactId: contactRecord.id,
+      configOwnerUserId,
+      inboundMessageId: message.id,
+    })
   }
 
   // message.received webhook (public API). Awaited — not fire-and-forget
