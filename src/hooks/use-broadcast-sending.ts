@@ -756,13 +756,38 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
 
       // ── Step 4: Fetch recipients back (joined contact) ────────────
       setProgress(30);
-      const { data: recipients, error: recipientsFetchError } = await supabase
-        .from('broadcast_recipients')
-        .select('*, contact:contacts(*)')
-        .eq('broadcast_id', broadcast.id)
-        .limit(10000);
+      const allRecipients: any[] = [];
+      let rFrom = 0;
+      const R_CHUNK_SIZE = 1000;
+      let rHasMore = true;
 
-      if (recipientsFetchError || !recipients) {
+      while (rHasMore) {
+        const rTo = rFrom + R_CHUNK_SIZE - 1;
+        const { data: rBatch, error: recipientsFetchError } = await supabase
+          .from('broadcast_recipients')
+          .select('*, contact:contacts(*)')
+          .eq('broadcast_id', broadcast.id)
+          .range(rFrom, rTo);
+
+        if (recipientsFetchError) {
+          throw new Error('Failed to fetch broadcast recipients');
+        }
+
+        if (!rBatch || rBatch.length === 0) {
+          rHasMore = false;
+        } else {
+          allRecipients.push(...rBatch);
+          if (rBatch.length < R_CHUNK_SIZE) {
+            rHasMore = false;
+          } else {
+            rFrom += R_CHUNK_SIZE;
+          }
+        }
+      }
+
+      const recipients = allRecipients;
+
+      if (!recipients || recipients.length === 0) {
         throw new Error('Failed to fetch broadcast recipients');
       }
 

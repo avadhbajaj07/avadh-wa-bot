@@ -510,15 +510,26 @@ export default function ContactsPage() {
     const term = search.trim();
 
     if (selectedTagIds.length > 0) {
-      const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
-        p_tag_ids: selectedTagIds,
-        p_search: term || null,
-        p_limit: 10000,
-        p_offset: 0,
-      });
-      if (error) throw error;
-      const rows = (data ?? []) as { contact: Contact }[];
-      return rows.map((r) => r.contact.id);
+      let offset = 0;
+      let hasMore = true;
+      const ids: string[] = [];
+      while (hasMore) {
+        const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
+          p_tag_ids: selectedTagIds,
+          p_search: term || null,
+          p_limit: 1000,
+          p_offset: offset,
+        });
+        if (error) throw error;
+        const rows = (data ?? []) as { contact: Contact }[];
+        rows.forEach((r) => ids.push(r.contact.id));
+        if (rows.length < 1000) {
+          hasMore = false;
+        } else {
+          offset += 1000;
+        }
+      }
+      return ids;
     }
 
     if (statusFilter === 'unused') {
@@ -534,14 +545,19 @@ export default function ContactsPage() {
       }
       if (!term) return uIds;
       const like = `%${term}%`;
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('id')
-        .in('id', uIds)
-        .or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`)
-        .limit(10000);
-      if (error) throw error;
-      return (data ?? []).map((c) => c.id);
+      const ids: string[] = [];
+      const BATCH_SIZE = 500;
+      for (let i = 0; i < uIds.length; i += BATCH_SIZE) {
+        const batch = uIds.slice(i, i + BATCH_SIZE);
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('id')
+          .in('id', batch)
+          .or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+        if (error) throw error;
+        (data ?? []).forEach((c) => ids.push(c.id));
+      }
+      return ids;
     }
 
     if (statusFilter === 'active') {
@@ -555,24 +571,48 @@ export default function ContactsPage() {
       );
       if (!term) return activeIds;
       const like = `%${term}%`;
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('id')
-        .in('id', activeIds)
-        .or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`)
-        .limit(10000);
-      if (error) throw error;
-      return (data ?? []).map((c) => c.id);
+      const ids: string[] = [];
+      const BATCH_SIZE = 500;
+      for (let i = 0; i < activeIds.length; i += BATCH_SIZE) {
+        const batch = activeIds.slice(i, i + BATCH_SIZE);
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('id')
+          .in('id', batch)
+          .or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+        if (error) throw error;
+        (data ?? []).forEach((c) => ids.push(c.id));
+      }
+      return ids;
     }
 
-    let q = supabase.from('contacts').select('id');
-    if (term) {
-      const like = `%${term}%`;
-      q = q.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+    // All contacts: paginate with range(from, to) to bypass Supabase 1,000 row cap
+    let from = 0;
+    const CHUNK_SIZE = 1000;
+    let hasMore = true;
+    const allIds: string[] = [];
+
+    while (hasMore) {
+      const to = from + CHUNK_SIZE - 1;
+      let q = supabase.from('contacts').select('id').order('created_at', { ascending: false });
+      if (term) {
+        const like = `%${term}%`;
+        q = q.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+      }
+      const { data, error } = await q.range(from, to);
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        hasMore = false;
+      } else {
+        data.forEach((c) => allIds.push(c.id));
+        if (data.length < CHUNK_SIZE) {
+          hasMore = false;
+        } else {
+          from += CHUNK_SIZE;
+        }
+      }
     }
-    const { data, error } = await q.limit(10000);
-    if (error) throw error;
-    return (data ?? []).map((c) => c.id);
+    return allIds;
   }, [supabase, search, selectedTagIds, statusFilter, unusedStats]);
 
   async function handleSelectAllToggle() {
@@ -741,28 +781,156 @@ export default function ContactsPage() {
   async function handleExportCsv() {
     try {
       toast.info('Preparing contacts export...');
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('name, phone, email, company, created_at')
-        .order('created_at', { ascending: false })
-        .limit(10000);
+      
+      const allData: { name: string | null; phone: string | null; email: string | null; company: string | null; created_at: string }[] = [];
+      const CHUNK_SIZE = 1000;
+      let from = 0;
+      let hasMore = true;
 
-      if (error) throw error;
-      if (!data || data.length === 0) {
+      // If user has specific selected contacts (and not all), export only those
+      if (selected.size > 0 && selected.size < totalCount) {
+        const selectedIds = Array.from(selected);
+        const BATCH_SIZE = 500;
+        for (let i = 0; i < selectedIds.length; i += BATCH_SIZE) {
+          const batch = selectedIds.slice(i, i + BATCH_SIZE);
+          const { data, error } = await supabase
+            .from('contacts')
+            .select('name, phone, email, company, created_at')
+            .in('id', batch)
+            .order('created_at', { ascending: false });
+          if (error) throw error;
+          if (data) allData.push(...data);
+        }
+      } else {
+        const term = search.trim();
+
+        if (statusFilter === 'unused') {
+          let uIds = unusedStats.ids;
+          if (uIds.length === 0 && unusedStats.count > 0) {
+            try {
+              const res = await fetch('/api/contacts/unused');
+              if (res.ok) {
+                const d = await res.json();
+                uIds = d.ids || [];
+              }
+            } catch {}
+          }
+          const BATCH_SIZE = 500;
+          for (let i = 0; i < uIds.length; i += BATCH_SIZE) {
+            const batch = uIds.slice(i, i + BATCH_SIZE);
+            let q = supabase
+              .from('contacts')
+              .select('name, phone, email, company, created_at')
+              .in('id', batch)
+              .order('created_at', { ascending: false });
+            if (term) {
+              const like = `%${term}%`;
+              q = q.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+            }
+            const { data, error } = await q;
+            if (error) throw error;
+            if (data) allData.push(...data);
+          }
+        } else if (statusFilter === 'active') {
+          const { data: convsWithMsgs } = await supabase
+            .from('conversations')
+            .select('contact_id')
+            .or('last_message_at.not.is.null,last_message_text.not.is.null');
+
+          const activeIds = Array.from(
+            new Set((convsWithMsgs ?? []).map((c) => c.contact_id).filter(Boolean) as string[])
+          );
+          const BATCH_SIZE = 500;
+          for (let i = 0; i < activeIds.length; i += BATCH_SIZE) {
+            const batch = activeIds.slice(i, i + BATCH_SIZE);
+            let q = supabase
+              .from('contacts')
+              .select('name, phone, email, company, created_at')
+              .in('id', batch)
+              .order('created_at', { ascending: false });
+            if (term) {
+              const like = `%${term}%`;
+              q = q.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+            }
+            const { data, error } = await q;
+            if (error) throw error;
+            if (data) allData.push(...data);
+          }
+        } else if (selectedTagIds.length > 0) {
+          while (hasMore) {
+            const { data, error } = await supabase.rpc('filter_contacts_by_tags', {
+              p_tag_ids: selectedTagIds,
+              p_search: term || null,
+              p_limit: CHUNK_SIZE,
+              p_offset: from,
+            });
+            if (error) throw error;
+            const rows = (data ?? []) as { contact: Contact }[];
+            if (rows.length === 0) {
+              hasMore = false;
+            } else {
+              for (const r of rows) {
+                allData.push({
+                  name: r.contact.name || null,
+                  phone: r.contact.phone || null,
+                  email: r.contact.email || null,
+                  company: r.contact.company || null,
+                  created_at: r.contact.created_at,
+                });
+              }
+              if (rows.length < CHUNK_SIZE) {
+                hasMore = false;
+              } else {
+                from += CHUNK_SIZE;
+              }
+            }
+          }
+        } else {
+          // Standard / All Contacts export (PAGINATED IN CHUNKS OF 1000 to fetch ALL contacts)
+          while (hasMore) {
+            const to = from + CHUNK_SIZE - 1;
+            let q = supabase
+              .from('contacts')
+              .select('name, phone, email, company, created_at')
+              .order('created_at', { ascending: false });
+
+            if (term) {
+              const like = `%${term}%`;
+              q = q.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+            }
+
+            const { data, error } = await q.range(from, to);
+            if (error) throw error;
+
+            if (!data || data.length === 0) {
+              hasMore = false;
+            } else {
+              allData.push(...data);
+              if (data.length < CHUNK_SIZE) {
+                hasMore = false;
+              } else {
+                from += CHUNK_SIZE;
+              }
+            }
+          }
+        }
+      }
+
+      if (allData.length === 0) {
         toast.error('No contacts to export');
         return;
       }
 
       const headers = ['Name', 'Phone', 'Email', 'Company', 'Created At'];
-      const rows = data.map((c) => [
+      const rows = allData.map((c) => [
         `"${(c.name || '').replace(/"/g, '""')}"`,
         `"${(c.phone || '').replace(/"/g, '""')}"`,
         `"${(c.email || '').replace(/"/g, '""')}"`,
         `"${(c.company || '').replace(/"/g, '""')}"`,
-        `"${new Date(c.created_at).toISOString()}"`,
+        `"${c.created_at ? new Date(c.created_at).toISOString() : ''}"`,
       ]);
 
-      const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+      const csvContent = '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -772,7 +940,7 @@ export default function ContactsPage() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      toast.success(`Exported ${data.length} contacts`);
+      toast.success(`Successfully exported all ${allData.length} contacts!`);
     } catch (err) {
       console.error('Export error:', err);
       toast.error('Failed to export contacts');
