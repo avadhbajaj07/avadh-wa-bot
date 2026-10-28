@@ -13,17 +13,17 @@
     }
 
     body {
-      width: 330px;
+      width: 350px;
       background: #111b21;
       color: #e9edef;
-      padding: 18px;
+      padding: 16px;
     }
 
     .header {
       display: flex;
       align-items: center;
       gap: 12px;
-      margin-bottom: 14px;
+      margin-bottom: 12px;
       padding-bottom: 12px;
       border-bottom: 1px solid #222e35;
     }
@@ -72,39 +72,75 @@
       margin-bottom: 14px;
     }
 
-    .btn-download {
+    .actions-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .btn-action {
       width: 100%;
-      background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
-      color: #ffffff;
       border: none;
-      border-radius: 12px;
-      padding: 13px;
-      font-size: 14px;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 13px;
       font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      box-shadow: 0 4px 14px rgba(37, 211, 102, 0.35);
       transition: all 0.2s ease;
-      margin-bottom: 14px;
+      text-align: center;
     }
 
-    .btn-download:hover {
+    .btn-action:hover {
       filter: brightness(1.1);
       transform: translateY(-1px);
     }
 
-    .btn-download:active {
+    .btn-action:active {
       transform: translateY(0);
+    }
+
+    /* Primary: All Groups Master */
+    .btn-primary {
+      background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(37, 211, 102, 0.35);
+      font-size: 13.5px;
+      padding: 13px 14px;
+    }
+
+    /* Secondary: Detailed List */
+    .btn-secondary {
+      background: #202c33;
+      color: #00a884;
+      border: 1px solid rgba(0, 168, 132, 0.4);
+    }
+    .btn-secondary:hover {
+      background: #2a3942;
+    }
+
+    /* Tertiary: Active Group Only */
+    .btn-tertiary {
+      background: transparent;
+      color: #aebac1;
+      border: 1px solid #3b4a54;
+      font-size: 12px;
+      padding: 9px 12px;
+    }
+    .btn-tertiary:hover {
+      background: #202c33;
+      color: #e9edef;
     }
 
     .steps-card {
       background: #202c33;
       border-radius: 10px;
       padding: 12px;
-      font-size: 12px;
+      font-size: 11.5px;
       color: #d1d7db;
       line-height: 1.5;
     }
@@ -130,8 +166,9 @@
       margin-top: 12px;
       font-size: 12px;
       text-align: center;
-      min-height: 18px;
+      min-height: 20px;
       color: #8696a0;
+      line-height: 1.4;
     }
 
     .status-msg.success {
@@ -141,6 +178,10 @@
 
     .status-msg.error {
       color: #ea4335;
+    }
+
+    .status-msg.info {
+      color: #53bdeb;
     }
   </style>
 </head>
@@ -153,25 +194,38 @@
     </div>
     <div class="title-box">
       <h1>WhatsApp Group Extractor</h1>
-      <p>All Real Phone Numbers (Saved &amp; Unsaved)</p>
+      <p>All Groups &amp; Announcements (1-Click)</p>
     </div>
   </div>
 
-  <span class="badge-features">⚡ v1.4.0 - Real Phone Numbers</span>
+  <span class="badge-features">⚡ v1.5.0 - All Groups &amp; Announcements</span>
 
-  <button id="downloadBtn" class="btn-download">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
-    </svg>
-    <span>Export All Numbers (CSV)</span>
-  </button>
+  <div class="actions-container">
+    <!-- Action 1: Master All Groups Export -->
+    <button id="downloadAllMasterBtn" class="btn-action btn-primary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
+      </svg>
+      <span>Export ALL Groups &amp; Announcements</span>
+    </button>
+
+    <!-- Action 2: Group-by-Group Detailed -->
+    <button id="downloadAllDetailedBtn" class="btn-action btn-secondary">
+      <span>📋 Detailed Group-by-Group CSV</span>
+    </button>
+
+    <!-- Action 3: Current Active Group -->
+    <button id="downloadActiveBtn" class="btn-action btn-tertiary">
+      <span>📍 Export Currently Open Group Only</span>
+    </button>
+  </div>
 
   <div class="steps-card">
-    <h2>Instructions:</h2>
+    <h2>Features:</h2>
     <ol>
-      <li>Click on your WhatsApp Group.</li>
-      <li>Click the green <b>"Export Group CSV"</b> button in the header, or click the button above!</li>
-      <li>Exports 100% verified real phone numbers (+91...). Names are included for saved contacts.</li>
+      <li><b>1-Click All Groups:</b> Exports all saved &amp; unsaved phone numbers across all regular groups and announcement groups.</li>
+      <li><b>No Duplicates:</b> Master CSV deduplicates numbers and tags all joined groups in a single column.</li>
+      <li><b>Real Numbers Only:</b> Automatically resolves LIDs to real <code>+91...</code> numbers.</li>
     </ol>
   </div>
 

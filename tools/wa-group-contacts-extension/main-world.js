@@ -1,4 +1,4 @@
-// WhatsApp Group Contact Extractor - v1.4.0 (Real Phone Number & LID Resolution Engine)
+// WhatsApp Group Contact Extractor - v1.5.0 (All Groups & Announcements 1-Click Engine)
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -15,8 +15,8 @@ function showToast(message, type = 'success') {
   setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transition = 'opacity 0.4s ease';
-    setTimeout(() => toast.remove(), 5000);
-  }, 5000);
+    setTimeout(() => toast.remove(), 6000);
+  }, 6000);
 }
 
 // Extract string representation from any WhatsApp Wid object or primitive
@@ -82,6 +82,50 @@ function getContactAttrs(c) {
   };
 }
 
+// React Fiber helper
+function getReactData(el) {
+  if (!el) return null;
+  const key = Object.keys(el).find((k) =>
+    k.startsWith('__reactFiber$') ||
+    k.startsWith('__reactInternalInstance$') ||
+    k.startsWith('__reactProps$')
+  );
+  return key ? el[key] : null;
+}
+
+function findScrollable(startEl) {
+  let curr = startEl;
+  while (curr && curr !== document.body && curr !== document.documentElement) {
+    try {
+      const s = window.getComputedStyle(curr);
+      if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && curr.scrollHeight > curr.clientHeight) {
+        return curr;
+      }
+    } catch (_) {}
+    curr = curr.parentElement;
+  }
+  return null;
+}
+
+function toPlainArray(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (raw.models && Array.isArray(raw.models)) return raw.models;
+  if (raw._models && Array.isArray(raw._models)) return raw._models;
+  if (typeof raw.forEach === 'function') {
+    const arr = [];
+    raw.forEach((item) => arr.push(item));
+    return arr;
+  }
+  if (typeof raw.values === 'function') {
+    return Array.from(raw.values());
+  }
+  return [];
+}
+
+// Global reference to Webpack GroupMetadata module if found
+let globalGroupMetaModule = null;
+
 // Build global phone directory from WhatsApp Web IndexedDB & Webpack
 async function buildPhoneDirectory() {
   const lidToPhone = new Map();
@@ -134,7 +178,7 @@ async function buildPhoneDirectory() {
     } catch (_) {}
 
     await new Promise((resolve) => {
-      const timeout = setTimeout(resolve, 1500); // Max 1.5s timeout safety
+      const timeout = setTimeout(resolve, 1500); // 1.5s safety timeout
       let pendingDbs = dbNames.length;
 
       if (pendingDbs === 0) {
@@ -213,12 +257,16 @@ async function buildPhoneDirectory() {
   try {
     if (window.webpackChunkwhatsapp_web_client) {
       window.webpackChunkwhatsapp_web_client.push([
-        ['extractor_' + Date.now()],
+        ['extractor_dir_' + Date.now()],
         {},
         (req) => {
           for (const k in req.c) {
             const exp = req.c[k]?.exports;
             if (!exp) continue;
+
+            if (exp.GroupMetadata || exp.default?.GroupMetadata) {
+              globalGroupMetaModule = exp.GroupMetadata || exp.default?.GroupMetadata;
+            }
 
             const targets = [
               exp.Contact,
@@ -247,47 +295,6 @@ async function buildPhoneDirectory() {
 
   console.log(`[WA-Extractor] Directory ready: ${lidToPhone.size} LIDs and ${nameToPhone.size} names resolved.`);
   return { lidToPhone, nameToPhone };
-}
-
-// React Fiber helper
-function getReactData(el) {
-  if (!el) return null;
-  const key = Object.keys(el).find((k) =>
-    k.startsWith('__reactFiber$') ||
-    k.startsWith('__reactInternalInstance$') ||
-    k.startsWith('__reactProps$')
-  );
-  return key ? el[key] : null;
-}
-
-function findScrollable(startEl) {
-  let curr = startEl;
-  while (curr && curr !== document.body && curr !== document.documentElement) {
-    try {
-      const s = window.getComputedStyle(curr);
-      if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && curr.scrollHeight > curr.clientHeight) {
-        return curr;
-      }
-    } catch (_) {}
-    curr = curr.parentElement;
-  }
-  return null;
-}
-
-function toPlainArray(raw) {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw;
-  if (raw.models && Array.isArray(raw.models)) return raw.models;
-  if (raw._models && Array.isArray(raw._models)) return raw._models;
-  if (typeof raw.forEach === 'function') {
-    const arr = [];
-    raw.forEach((item) => arr.push(item));
-    return arr;
-  }
-  if (typeof raw.values === 'function') {
-    return Array.from(raw.values());
-  }
-  return [];
 }
 
 // Parse participant model and resolve to REAL phone number
@@ -364,7 +371,386 @@ function parseParticipant(p, contactObj, directory) {
   };
 }
 
-// Get active group info strictly from #main
+// Fetch ALL groups and announcement channels from IndexedDB & Webpack
+async function getAllGroupsFromStorage() {
+  const groupsMap = new Map(); // id -> { id, title, isAnnouncement, participants }
+
+  // 1. Scan Webpack modules
+  try {
+    if (window.webpackChunkwhatsapp_web_client) {
+      window.webpackChunkwhatsapp_web_client.push([
+        ['extractor_groups_' + Date.now()],
+        {},
+        (req) => {
+          for (const k in req.c) {
+            const exp = req.c[k]?.exports;
+            if (!exp) continue;
+
+            if (exp.GroupMetadata || exp.default?.GroupMetadata) {
+              globalGroupMetaModule = exp.GroupMetadata || exp.default?.GroupMetadata;
+            }
+
+            const candidates = [
+              exp.GroupMetadata,
+              exp.default?.GroupMetadata,
+              exp.GroupMetadataCollection,
+              exp.default?.GroupMetadataCollection,
+              exp.Chat,
+              exp.default?.Chat,
+              exp.ChatCollection,
+              exp.default?.ChatCollection,
+            ];
+
+            for (const item of candidates) {
+              if (!item) continue;
+              const models = item.models || item._models || (Array.isArray(item) ? item : null);
+              if (models && (Array.isArray(models) || typeof models.forEach === 'function')) {
+                const arr = Array.isArray(models) ? models : Array.from(models.values ? models.values() : []);
+                for (const m of arr) {
+                  const idStr = extractWid(m.id || m.attributes?.id);
+                  if (idStr.endsWith('@g.us')) {
+                    const isAnnounce = !!(
+                      m.isAnnounce ||
+                      m.announce ||
+                      m.isAnnouncement ||
+                      m.isParentGroup ||
+                      m.attributes?.isAnnounce ||
+                      m.attributes?.announce ||
+                      m.attributes?.isAnnouncement ||
+                      m.attributes?.isParentGroup
+                    );
+                    const title = m.subject || m.name || m.formattedTitle || m.attributes?.subject || m.attributes?.name || '';
+                    const gm = m.groupMetadata || m.attributes?.groupMetadata || m;
+                    const parts = toPlainArray(gm.participants || gm.__x_participants || gm.attributes?.participants);
+
+                    if (!groupsMap.has(idStr)) {
+                      groupsMap.set(idStr, {
+                        id: idStr,
+                        title: title || 'Unnamed Group',
+                        isAnnouncement: isAnnounce,
+                        participants: parts,
+                      });
+                    } else {
+                      const existing = groupsMap.get(idStr);
+                      if (title && (!existing.title || existing.title === 'Unnamed Group')) {
+                        existing.title = title;
+                      }
+                      if (parts.length > existing.participants.length) {
+                        existing.participants = parts;
+                      }
+                      existing.isAnnouncement = existing.isAnnouncement || isAnnounce;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+      ]);
+    }
+  } catch (err) {
+    console.warn('[WA-Extractor] Webpack group extraction error:', err);
+  }
+
+  // 2. Scan IndexedDB across all databases
+  try {
+    let dbNames = ['model-storage', 'wawc', 'whatsapp', 'wawc_db'];
+    try {
+      if (typeof indexedDB.databases === 'function') {
+        const found = await indexedDB.databases();
+        const names = found.map((d) => d.name).filter(Boolean);
+        if (names.length > 0) dbNames = Array.from(new Set([...names, ...dbNames]));
+      }
+    } catch (_) {}
+
+    await new Promise((resolve) => {
+      const timeout = setTimeout(resolve, 2000);
+      let pendingDbs = dbNames.length;
+      if (pendingDbs === 0) {
+        clearTimeout(timeout);
+        return resolve();
+      }
+
+      const doneDb = () => {
+        pendingDbs--;
+        if (pendingDbs <= 0) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      };
+
+      for (const dbName of dbNames) {
+        try {
+          const req = indexedDB.open(dbName);
+          req.onerror = () => doneDb();
+          req.onblocked = () => doneDb();
+          req.onsuccess = () => {
+            const db = req.result;
+            const storeNames = Array.from(db.objectStoreNames || []);
+            const targetStores = storeNames.filter((s) => /group-metadata|chat/i.test(s));
+
+            if (targetStores.length === 0) {
+              db.close();
+              return doneDb();
+            }
+
+            let pendingStores = targetStores.length;
+            for (const sName of targetStores) {
+              try {
+                const tx = db.transaction(sName, 'readonly');
+                const store = tx.objectStore(sName);
+                const getAll = store.getAll();
+
+                getAll.onsuccess = () => {
+                  const records = getAll.result || [];
+                  for (const r of records) {
+                    const idStr = extractWid(r.id);
+                    if (idStr.endsWith('@g.us')) {
+                      const isAnnounce = !!(
+                        r.isAnnounce ||
+                        r.announce ||
+                        r.isAnnouncement ||
+                        r.isParentGroup
+                      );
+                      const title = r.subject || r.name || r.formattedTitle || '';
+                      const parts = toPlainArray(r.participants || r.groupMetadata?.participants);
+
+                      if (!groupsMap.has(idStr)) {
+                        groupsMap.set(idStr, {
+                          id: idStr,
+                          title: title || 'Unnamed Group',
+                          isAnnouncement: isAnnounce,
+                          participants: parts,
+                        });
+                      } else {
+                        const existing = groupsMap.get(idStr);
+                        if (title && (!existing.title || existing.title === 'Unnamed Group')) {
+                          existing.title = title;
+                        }
+                        if (parts.length > existing.participants.length) {
+                          existing.participants = parts;
+                        }
+                        existing.isAnnouncement = existing.isAnnouncement || isAnnounce;
+                      }
+                    }
+                  }
+                  pendingStores--;
+                  if (pendingStores <= 0) {
+                    db.close();
+                    doneDb();
+                  }
+                };
+
+                getAll.onerror = () => {
+                  pendingStores--;
+                  if (pendingStores <= 0) {
+                    db.close();
+                    doneDb();
+                  }
+                };
+              } catch (_) {
+                pendingStores--;
+                if (pendingStores <= 0) {
+                  db.close();
+                  doneDb();
+                }
+              }
+            }
+          };
+        } catch (_) {
+          doneDb();
+        }
+      }
+    });
+  } catch (err) {
+    console.warn('[WA-Extractor] IndexedDB group extraction error:', err);
+  }
+
+  // 3. Scan React Fiber in sidebar chatlist to catch any open groups
+  try {
+    const paneSide = document.querySelector('#pane-side');
+    if (paneSide) {
+      const chatItems = paneSide.querySelectorAll('div[role="listitem"], div[tabindex="-1"]');
+      for (const item of chatItems) {
+        const fiber = getReactData(item);
+        if (fiber) {
+          let curr = fiber;
+          let d = 0;
+          while (curr && d < 15) {
+            const chat = curr.memoizedProps?.chat;
+            if (chat) {
+              const idStr = extractWid(chat.id);
+              if (idStr.endsWith('@g.us')) {
+                const title = chat.name || chat.formattedTitle || '';
+                const gm = chat.groupMetadata || chat.__x_groupMetadata;
+                const parts = toPlainArray(gm?.participants || gm?.__x_participants);
+                const isAnnounce = !!(chat.isAnnounce || gm?.isAnnounce || gm?.announce);
+
+                if (!groupsMap.has(idStr)) {
+                  groupsMap.set(idStr, {
+                    id: idStr,
+                    title: title || 'Unnamed Group',
+                    isAnnouncement: isAnnounce,
+                    participants: parts,
+                  });
+                } else {
+                  const existing = groupsMap.get(idStr);
+                  if (title && (!existing.title || existing.title === 'Unnamed Group')) existing.title = title;
+                  if (parts.length > existing.participants.length) existing.participants = parts;
+                  existing.isAnnouncement = existing.isAnnouncement || isAnnounce;
+                }
+              }
+              break;
+            }
+            curr = curr.return;
+            d++;
+          }
+        }
+      }
+    }
+  } catch (_) {}
+
+  return Array.from(groupsMap.values());
+}
+
+// -------------------------------------------------------------
+// EXPORT ALL GROUPS & ANNOUNCEMENTS (MASTER OR DETAILED MODE)
+// -------------------------------------------------------------
+async function runAllGroupsExtraction(mode = 'master') {
+  showToast('🔍 Scanning all groups & announcement channels in your WhatsApp...', 'info');
+
+  // 1. Build Global Phone Directory
+  const directory = await buildPhoneDirectory();
+
+  // 2. Retrieve All Groups from Storage & Memory
+  const groups = await getAllGroupsFromStorage();
+
+  if (groups.length === 0) {
+    showToast('No groups found. Please ensure your WhatsApp Web has loaded completely and try again.', 'error');
+    return { success: false, error: 'No groups found' };
+  }
+
+  let announcementCount = 0;
+  for (const g of groups) {
+    if (g.isAnnouncement) announcementCount++;
+  }
+
+  showToast(`Found ${groups.length} groups (${announcementCount} announcements). Resolving real numbers...`, 'info');
+
+  const uniqueContactsMap = new Map(); // phone -> { phone, clean, name, groups: [title], hasAnnouncement: boolean }
+  const detailedRows = []; // { phone, clean, name, groupTitle, isAnnouncement }
+
+  // 3. Process Participants in each group
+  for (const g of groups) {
+    let participants = g.participants;
+
+    // If participants not yet cached, attempt to fetch via GroupMetadata.find
+    if (participants.length === 0 && globalGroupMetaModule && typeof globalGroupMetaModule.find === 'function') {
+      try {
+        const fetched = await globalGroupMetaModule.find(g.id);
+        if (fetched) {
+          participants = toPlainArray(fetched.participants || fetched.__x_participants);
+        }
+      } catch (_) {}
+    }
+
+    const cleanGroupTitle = (g.title || 'Group').replace(/[\r\n]+/g, ' ').trim();
+
+    for (const p of participants) {
+      const parsed = parseParticipant(p, p.contact || p.__x_contact, directory);
+      if (parsed) {
+        // Detailed row
+        detailedRows.push({
+          phone: parsed.phone,
+          clean: parsed.clean,
+          name: parsed.name,
+          groupTitle: cleanGroupTitle,
+          isAnnouncement: g.isAnnouncement ? 'Yes' : 'No',
+        });
+
+        // Unique contact map
+        if (!uniqueContactsMap.has(parsed.clean)) {
+          uniqueContactsMap.set(parsed.clean, {
+            phone: parsed.phone,
+            clean: parsed.clean,
+            name: parsed.name,
+            groups: [cleanGroupTitle],
+            hasAnnouncement: g.isAnnouncement,
+          });
+        } else {
+          const existing = uniqueContactsMap.get(parsed.clean);
+          if (!existing.name && parsed.name) {
+            existing.name = parsed.name;
+          }
+          if (!existing.groups.includes(cleanGroupTitle)) {
+            existing.groups.push(cleanGroupTitle);
+          }
+          if (g.isAnnouncement) {
+            existing.hasAnnouncement = true;
+          }
+        }
+      }
+    }
+  }
+
+  const uniqueContacts = Array.from(uniqueContactsMap.values());
+
+  if (uniqueContacts.length === 0) {
+    showToast('No phone numbers could be extracted from your groups.', 'error');
+    return { success: false, error: 'No phone numbers found' };
+  }
+
+  const dateStr = new Date().toISOString().split('T')[0];
+  let csvContent = '\uFEFF'; // UTF-8 BOM
+
+  let filename = '';
+  if (mode === 'detailed') {
+    csvContent += 'Sr No,Name,Phone Number,Standard WhatsApp Format,Group Name,Is Announcement Group,Export Date\n';
+    detailedRows.forEach((r, idx) => {
+      const escapedName = `"${(r.name || '').replace(/"/g, '""')}"`;
+      const escapedGroup = `"${r.groupTitle.replace(/"/g, '""')}"`;
+      csvContent += `${idx + 1},${escapedName},"${r.phone}","${r.clean}",${escapedGroup},"${r.isAnnouncement}","${dateStr}"\n`;
+    });
+    filename = `WhatsApp_ALL_Groups_Detailed_${detailedRows.length}_Rows_${dateStr}.csv`;
+  } else {
+    // Master deduplicated CSV
+    csvContent += 'Sr No,Name,Phone Number,Standard WhatsApp Format,All Groups Joined,Total Groups Joined,In Announcement Group,Export Date\n';
+    uniqueContacts.forEach((contact, idx) => {
+      const escapedName = `"${(contact.name || '').replace(/"/g, '""')}"`;
+      const escapedGroups = `"${contact.groups.join('; ').replace(/"/g, '""')}"`;
+      const isAnnounce = contact.hasAnnouncement ? 'Yes' : 'No';
+      csvContent += `${idx + 1},${escapedName},"${contact.phone}","${contact.clean}",${escapedGroups},${contact.groups.length},"${isAnnounce}","${dateStr}"\n`;
+    });
+    filename = `WhatsApp_ALL_Groups_Master_${uniqueContacts.length}_Unique_Numbers_${dateStr}.csv`;
+  }
+
+  // Trigger Download
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const downloadUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = downloadUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(downloadUrl);
+
+  const namedCount = uniqueContacts.filter((c) => c.name).length;
+  showToast(`🎉 Exported ${uniqueContacts.length} unique phone numbers (${namedCount} with names) across ${groups.length} groups!`, 'success');
+
+  return {
+    success: true,
+    count: uniqueContacts.length,
+    detailedCount: detailedRows.length,
+    groupsCount: groups.length,
+    announcementCount,
+    namedCount,
+  };
+}
+
+// -------------------------------------------------------------
+// EXPORT CURRENT ACTIVE GROUP ONLY
+// -------------------------------------------------------------
 function getActiveGroupFromMain(currentTitle) {
   const mainEl = document.querySelector('#main');
   if (!mainEl) return null;
@@ -407,8 +793,7 @@ function getActiveGroupFromMain(currentTitle) {
   return null;
 }
 
-// Main Extractor Engine
-async function runExtraction() {
+async function runActiveGroupExtraction() {
   const mainEl = document.querySelector('#main');
   const header = mainEl ? mainEl.querySelector('header') : document.querySelector('header');
 
@@ -433,12 +818,10 @@ async function runExtraction() {
 
   showToast(`Resolving real phone numbers for "${currentGroupTitle}"...`, 'info');
 
-  // 1. BUILD PHONE DIRECTORY (LIDs & Saved Names -> Real Phone Numbers)
   const directory = await buildPhoneDirectory();
+  const contactsMap = new Map();
 
-  const contactsMap = new Map(); // cleanPhone -> { name, phone }
-
-  // 2. EXTRACT FROM ACTIVE GROUP REACT MEMORY
+  // 1. Memory from active chat
   const activeChatData = getActiveGroupFromMain(currentGroupTitle);
   if (activeChatData && activeChatData.participants && activeChatData.participants.length > 0) {
     for (const p of activeChatData.participants) {
@@ -450,7 +833,7 @@ async function runExtraction() {
     console.log(`[WA-Extractor] Memory extracted ${contactsMap.size} valid phone numbers.`);
   }
 
-  // 3. OPEN DRAWER & DEEP-SCROLL TO CAPTURE & RESOLVE EVERY MEMBER
+  // 2. Open drawer and scroll
   let drawer = document.querySelector('[data-testid="group-info-drawer"]') ||
                document.querySelector('[data-testid="group-info-participants-section"]') ||
                document.querySelector('div[role="dialog"]');
@@ -526,7 +909,6 @@ async function runExtraction() {
         for (const line of lines) {
           if (/Group Admin|You|Community/i.test(line)) continue;
 
-          // Check for phone number in text (unsaved contacts appear as phone numbers)
           const phoneMatch = line.match(/\+?[0-9][0-9\s-]{8,14}[0-9]/);
           if (phoneMatch) {
             const digits = phoneMatch[0].replace(/[\s-]/g, '');
@@ -541,13 +923,11 @@ async function runExtraction() {
             continue;
           }
 
-          // Saved contact names
           if (!rowName && /[a-zA-Z\u0900-\u097F]/.test(line) && line.length < 50) {
             rowName = line;
           }
         }
 
-        // If saved name found but no phone in row text, resolve via directory
         if (rowName && !rowPhone && directory.nameToPhone.has(rowName.toLowerCase())) {
           rowPhone = normalizePhone(directory.nameToPhone.get(rowName.toLowerCase()));
         }
@@ -582,7 +962,7 @@ async function runExtraction() {
     }
   }
 
-  // 4. SCAN HEADER SUBTITLE (unsaved numbers shown directly in group description/subtitle)
+  // 3. Scan header subtitle
   const headerSubtitle = header.innerText || '';
   const headerMatches = headerSubtitle.match(/\+?[0-9][0-9\s-]{8,14}[0-9]/g) || [];
 
@@ -607,11 +987,11 @@ async function runExtraction() {
     return { success: false, error: 'No numbers found' };
   }
 
-  // BUILD CSV
+  // Build CSV
   const dateStr = new Date().toISOString().split('T')[0];
   const safeTitle = currentGroupTitle.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().replace(/\s+/g, '_') || 'Group';
 
-  let csvContent = '\uFEFF'; // UTF-8 BOM
+  let csvContent = '\uFEFF';
   csvContent += 'Sr No,Name,Phone Number,Standard WhatsApp Format,Group Name,Exported Date\n';
 
   contacts.forEach((contact, idx) => {
@@ -620,7 +1000,6 @@ async function runExtraction() {
     csvContent += `${idx + 1},${escapedName},"${contact.phone}","${contact.clean}",${escapedGroup},"${dateStr}"\n`;
   });
 
-  // DOWNLOAD CSV
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const downloadUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -642,47 +1021,93 @@ async function runExtraction() {
   };
 }
 
-// Injects the 1-click button into WhatsApp header
-function injectHeaderButton() {
+// -------------------------------------------------------------
+// UI BUTTON INJECTION
+// -------------------------------------------------------------
+function injectUIButtons() {
+  // 1. Inject in Active Chat Header
   const mainEl = document.querySelector('#main');
-  const header = mainEl ? mainEl.querySelector('header') : document.querySelector('header');
-  if (!header) return;
+  const header = mainEl ? mainEl.querySelector('header') : null;
 
-  if (document.querySelector('.wa-extractor-btn')) return;
+  if (header && !header.querySelector('.wa-extractor-floating-container')) {
+    const container = document.createElement('div');
+    container.className = 'wa-extractor-floating-container';
 
-  const btnContainer = document.createElement('div');
-  btnContainer.className = 'wa-extractor-floating-container';
+    // Button: This Group
+    const btnThis = document.createElement('button');
+    btnThis.className = 'wa-extractor-btn';
+    btnThis.title = 'Extract real phone numbers from this active group to CSV';
+    btnThis.innerHTML = `
+      <svg viewBox="0 0 24 24">
+        <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
+      </svg>
+      <span>Export Group CSV</span>
+    `;
+    btnThis.addEventListener('click', (e) => {
+      e.stopPropagation();
+      runActiveGroupExtraction();
+    });
 
-  const btn = document.createElement('button');
-  btn.className = 'wa-extractor-btn';
-  btn.title = 'Extract all real phone numbers from this group to CSV';
-  btn.innerHTML = `
-    <svg viewBox="0 0 24 24">
-      <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
-    </svg>
-    <span>Export Group CSV</span>
-  `;
+    // Button: All Groups
+    const btnAll = document.createElement('button');
+    btnAll.className = 'wa-extractor-btn wa-extractor-btn-all';
+    btnAll.title = 'Extract all phone numbers from ALL groups & announcements to CSV in 1 click';
+    btnAll.innerHTML = `
+      <svg viewBox="0 0 24 24">
+        <path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9h-4v4h-2v-4H9V9h4V5h2v4h4v2z"/>
+      </svg>
+      <span>📥 Export ALL Groups</span>
+    `;
+    btnAll.addEventListener('click', (e) => {
+      e.stopPropagation();
+      runAllGroupsExtraction('master');
+    });
 
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    runExtraction();
-  });
+    container.appendChild(btnThis);
+    container.appendChild(btnAll);
+    header.appendChild(container);
+  }
 
-  btnContainer.appendChild(btn);
-  header.appendChild(btnContainer);
+  // 2. Inject in Left Sidebar Header (next to status / new chat icons)
+  const sidebarHeader = document.querySelector('header:not(#main header)');
+  if (sidebarHeader && !sidebarHeader.querySelector('.wa-extractor-sidebar-btn')) {
+    const btnSidebar = document.createElement('button');
+    btnSidebar.className = 'wa-extractor-btn wa-extractor-btn-all wa-extractor-sidebar-btn';
+    btnSidebar.title = 'Extract all numbers across all groups & announcements in 1 click';
+    btnSidebar.innerHTML = `
+      <svg viewBox="0 0 24 24">
+        <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
+      </svg>
+      <span>Export ALL Groups</span>
+    `;
+    btnSidebar.addEventListener('click', (e) => {
+      e.stopPropagation();
+      runAllGroupsExtraction('master');
+    });
+
+    sidebarHeader.appendChild(btnSidebar);
+  }
 }
 
 const observer = new MutationObserver(() => {
-  injectHeaderButton();
+  injectUIButtons();
 });
 
 observer.observe(document.body, { childList: true, subtree: true });
-setTimeout(injectHeaderButton, 1500);
+setTimeout(injectUIButtons, 1500);
 
-// Listen to message from bridge (for popup button)
+// -------------------------------------------------------------
+// MESSAGE LISTENER (FROM POPUP VIA CONTENT-BRIDGE)
+// -------------------------------------------------------------
 window.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'WA_EXTRACTOR_START') {
-    runExtraction().then((res) => {
+  if (!event.data) return;
+
+  if (event.data.type === 'WA_EXTRACTOR_START_ALL') {
+    runAllGroupsExtraction(event.data.mode || 'master').then((res) => {
+      window.postMessage({ type: 'WA_EXTRACTOR_RESULT', result: res }, '*');
+    });
+  } else if (event.data.type === 'WA_EXTRACTOR_START_ACTIVE' || event.data.type === 'WA_EXTRACTOR_START') {
+    runActiveGroupExtraction().then((res) => {
       window.postMessage({ type: 'WA_EXTRACTOR_RESULT', result: res }, '*');
     });
   }

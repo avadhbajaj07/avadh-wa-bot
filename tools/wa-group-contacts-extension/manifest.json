@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "WhatsApp Group Contact Extractor",
-  "version": "1.4.0",
-  "description": "Extract ALL real saved and unsaved phone numbers from any WhatsApp Group in 1 click and download as CSV.",
+  "version": "1.5.0",
+  "description": "Extract ALL phone numbers from all groups, announcement groups, and channels in 1 click and download as CSV.",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",
