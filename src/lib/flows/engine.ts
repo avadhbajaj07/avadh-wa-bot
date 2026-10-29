@@ -1241,10 +1241,16 @@ async function handleReplyForActiveRun(
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
-  // Allow user to reset to main menu at any time if they type menu/start/restart/reset
+  // Allow user to reset to main menu at any time if they type menu/start/restart/reset or come from Instagram ads
   if (message.kind === "text") {
     const txt = message.text.trim().toLowerCase();
-    if (txt === "menu" || txt === "start" || txt === "restart" || txt === "reset") {
+    if (
+      txt === "menu" ||
+      txt === "start" ||
+      txt === "restart" ||
+      txt === "reset" ||
+      txt.includes("can i get more info")
+    ) {
       await endRun(db, run.id, "completed", "user_restart");
       const flow = await loadFlow(db, run.flow_id);
       if (flow && flow.entry_node_id) {
