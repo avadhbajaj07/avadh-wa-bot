@@ -272,12 +272,64 @@ export async function GET(request: Request) {
   }
 }
 
+/** Maruti Cab Webhook Relay Configuration */
+const MARUTI_CAB_RELAY_URL = 'https://www.maruticab.in/api/whatsapp/webhook'
+const MARUTI_CAB_PHONE_NUMBER_ID = '1379464058575093'
+
+function isMarutiCabPayload(rawBody: string): boolean {
+  return (
+    rawBody.includes(MARUTI_CAB_PHONE_NUMBER_ID) ||
+    rawBody.includes('7282316090') ||
+    rawBody.includes('917282316090')
+  )
+}
+
+async function relayToMarutiCab(rawBody: string, signature: string | null): Promise<void> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 5000)
+
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (signature) {
+      headers['x-hub-signature-256'] = signature
+    }
+
+    const response = await fetch(MARUTI_CAB_RELAY_URL, {
+      method: 'POST',
+      headers,
+      body: rawBody,
+      signal: controller.signal,
+    })
+
+    console.log(`[relay:maruticab] forwarded payload, response status: ${response.status}`)
+  } catch (error: unknown) {
+    if ((error as { name?: string })?.name === 'AbortError') {
+      console.warn('[relay:maruticab] request timed out after 5000ms')
+    } else {
+      console.error('[relay:maruticab] failed to relay webhook:', error)
+    }
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
 // POST - Receive messages
 export async function POST(request: Request) {
   // Read raw body first so we can HMAC-verify the exact bytes Meta
   // signed. request.json() would re-encode and break the signature.
   const rawBody = await request.text()
   const signature = request.headers.get('x-hub-signature-256')
+
+  // Non-blocking relay for Maruti Cab (+91 72823 16090 / Phone Number ID: 1379464058575093)
+  let marutiRelayPromise: Promise<void> | null = null
+  if (isMarutiCabPayload(rawBody)) {
+    marutiRelayPromise = relayToMarutiCab(rawBody, signature).catch((err) => {
+      console.error('[relay:maruticab] uncaught relay error:', err)
+    })
+  }
+
   let body: { entry?: WhatsAppWebhookEntry[] }
   try {
     body = JSON.parse(rawBody)
@@ -351,6 +403,14 @@ export async function POST(request: Request) {
   // keeps the function alive until it resolves (within the route's
   // maxDuration).
   after(async () => {
+    if (marutiRelayPromise) {
+      try {
+        await marutiRelayPromise
+      } catch (relayErr) {
+        console.error('[relay:maruticab] background execution error:', relayErr)
+      }
+    }
+
     try {
       await processWebhook(body)
     } catch (error) {
