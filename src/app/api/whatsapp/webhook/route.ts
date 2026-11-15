@@ -206,6 +206,7 @@ export async function GET(request: Request) {
     const isFallbackToken =
       verifyToken === 'shikha_wa_verify_2026' ||
       verifyToken === 'avadh_maruti_bot' ||
+      verifyToken === 'maruticab_webhook_2025' ||
       (process.env.WHATSAPP_VERIFY_TOKEN && verifyToken === process.env.WHATSAPP_VERIFY_TOKEN)
 
     if (matchedConfig || isFallbackToken) {
@@ -295,12 +296,14 @@ export async function POST(request: Request) {
   const rawBody = await request.text()
   const signature = request.headers.get('x-hub-signature-256')
 
-  // Non-blocking relay for Maruti Cab (+91 72823 16090 / Phone Number ID: 1379464058575093)
-  let marutiRelayPromise: Promise<void> | null = null
+  // Guaranteed relay for Maruti Cab (+91 72823 16090 / Phone Number ID: 1379464058575093)
+  // Protected with a 5000ms AbortController timeout so other clients and this server are never blocked.
   if (isMarutiCabPayload(rawBody)) {
-    marutiRelayPromise = relayToMarutiCab(rawBody, signature).catch((err) => {
-      console.error('[relay:maruticab] uncaught relay error:', err)
-    })
+    try {
+      await relayToMarutiCab(rawBody, signature)
+    } catch (err) {
+      console.error('[relay:maruticab] relay execution error:', err)
+    }
   }
 
   let body: { entry?: WhatsAppWebhookEntry[] }
@@ -376,14 +379,6 @@ export async function POST(request: Request) {
   // keeps the function alive until it resolves (within the route's
   // maxDuration).
   after(async () => {
-    if (marutiRelayPromise) {
-      try {
-        await marutiRelayPromise
-      } catch (relayErr) {
-        console.error('[relay:maruticab] background execution error:', relayErr)
-      }
-    }
-
     try {
       await processWebhook(body)
     } catch (error) {
