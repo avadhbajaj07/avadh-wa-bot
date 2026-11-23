@@ -19,7 +19,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { loadAccountMetaCredentials } from '@/lib/flows/meta-send'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
-import { isShikhaBajajAccount } from '@/lib/whatsapp/shikha'
+import { isShikhaBajajAccount, getShikhaAutomatedReply } from '@/lib/whatsapp/shikha'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
 import {
   handleTemplateWebhookChange,
@@ -1158,6 +1158,82 @@ async function processMessage(
   await flagBroadcastReplyIfAny(accountId, contactRecord.id)
 
   // ============================================================
+  // Shikha Bajaj Automated Responses (Yoga Classes)
+  //
+  // Strictly applies ONLY to Shikha Bajaj accounts (9406633778).
+  // - Timing enquiry -> Send Yoga batch timings only
+  // - Location / Address enquiry -> Send i-Play Sports Arena location only
+  // - Fees enquiry -> Send 1200/- per month only
+  // - Hi / Hello / anything else -> Do NOT reply ("kuch bhi reply nhi karna hai")
+  // Flows, automations, and AI replies are bypassed for this account.
+  // ============================================================
+  const isShikha = await isShikhaBajajAccount(supabaseAdmin(), accountId)
+  if (isShikha) {
+    const inboundText = contentText ?? message.text?.body ?? ''
+    const automatedReply = getShikhaAutomatedReply({
+      messageType: message.type,
+      interactiveReplyId,
+      buttonText:
+        message.button?.text ??
+        message.interactive?.button_reply?.title ??
+        null,
+      buttonPayload:
+        message.button?.payload ??
+        message.interactive?.button_reply?.id ??
+        null,
+      text: inboundText,
+    })
+
+    if (automatedReply) {
+      try {
+        const { phoneNumberId } = await loadAccountMetaCredentials(
+          supabaseAdmin(),
+          accountId
+        )
+        const sendTarget = resolveContactSendTarget(contactRecord)
+        const to = sendTarget?.target || message.from
+
+        if (to) {
+          const sendRes = await sendTextMessage({
+            phoneNumberId,
+            accessToken,
+            to,
+            text: automatedReply.text,
+          })
+
+          if (sendRes?.messageId) {
+            await supabaseAdmin().from('messages').insert({
+              conversation_id: conversation.id,
+              sender_type: 'bot',
+              content_type: 'text',
+              content_text: automatedReply.text,
+              message_id: sendRes.messageId,
+              status: 'sent',
+            })
+          }
+
+          await supabaseAdmin()
+            .from('conversations')
+            .update({
+              last_message_text: automatedReply.text,
+              last_message_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', conversation.id)
+        }
+      } catch (err) {
+        console.error('[shikha] automated reply failed to send:', err)
+      }
+    } else {
+      console.info(
+        '[shikha] no automated response matched for inbound message; skipping reply per instructions'
+      )
+    }
+
+    return
+  }
+
+  // ============================================================
   // Flow runner dispatch.
   //
   // If the runner consumes the message (it either advanced an active
@@ -1267,9 +1343,7 @@ async function processMessage(
   // AI auto-reply. Runs only for plain-text inbound the deterministic
   // flow runner did NOT consume (flows win over the LLM), and only when
   // the account has enabled it.
-  // NOTE: Strictly disabled for Shikha Bajaj accounts per user instructions
-  // so the AI does not automatically chat with clients.
-  const isShikha = await isShikhaBajajAccount(supabaseAdmin(), accountId)
+  // NOTE: Shikha Bajaj accounts return early above; non-Shikha accounts proceed.
   if (!flowConsumed && !interactiveReplyId && inboundText.trim() && !isShikha) {
     await dispatchInboundToAiReply({
       accountId,

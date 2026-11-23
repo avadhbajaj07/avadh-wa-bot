@@ -1,5 +1,166 @@
 import { describe, it, expect } from 'vitest'
-import { isSessionDetailsClick, isShikhaBajajAccount } from './shikha'
+import {
+  isSessionDetailsClick,
+  isShikhaBajajAccount,
+  getShikhaAutomatedReply,
+  SHIKHA_YOGA_TIMING_MESSAGE,
+  SHIKHA_YOGA_LOCATION_MESSAGE,
+  SHIKHA_YOGA_FEES_MESSAGE,
+} from './shikha'
+
+describe('getShikhaAutomatedReply', () => {
+  describe('Timing enquiries', () => {
+    it('matches when user clicks a timing button', () => {
+      const res = getShikhaAutomatedReply({
+        messageType: 'button',
+        buttonText: 'Yoga Class Timing',
+        buttonPayload: 'timing',
+      })
+      expect(res).not.toBeNull()
+      expect(res?.kind).toBe('timing')
+      expect(res?.text).toBe(SHIKHA_YOGA_TIMING_MESSAGE)
+    })
+
+    it('matches interactive button reply for timing', () => {
+      const res = getShikhaAutomatedReply({
+        messageType: 'interactive',
+        interactiveReplyId: 'btn_timing',
+        buttonText: 'Timing',
+      })
+      expect(res?.kind).toBe('timing')
+      expect(res?.text).toBe(SHIKHA_YOGA_TIMING_MESSAGE)
+    })
+
+    it('matches typed timing questions', () => {
+      const phrases = [
+        'timing',
+        'timings',
+        'yoga class timing',
+        'what is the timing?',
+        'class time kya hai',
+        'morning batch timing',
+        'batches kab hoti hai',
+        'schedule of yoga classes',
+      ]
+      for (const phrase of phrases) {
+        const res = getShikhaAutomatedReply({ text: phrase })
+        expect(res?.kind).toBe('timing')
+        expect(res?.text).toBe(SHIKHA_YOGA_TIMING_MESSAGE)
+      }
+    })
+  })
+
+  describe('Location enquiries', () => {
+    it('matches when user clicks location button', () => {
+      const res = getShikhaAutomatedReply({
+        messageType: 'button',
+        buttonText: 'Location',
+        buttonPayload: 'location',
+      })
+      expect(res).not.toBeNull()
+      expect(res?.kind).toBe('location')
+      expect(res?.text).toBe(SHIKHA_YOGA_LOCATION_MESSAGE)
+    })
+
+    it('matches interactive button reply for address/venue', () => {
+      const res = getShikhaAutomatedReply({
+        messageType: 'interactive',
+        interactiveReplyId: 'btn_address',
+        buttonText: 'Address',
+      })
+      expect(res?.kind).toBe('location')
+      expect(res?.text).toBe(SHIKHA_YOGA_LOCATION_MESSAGE)
+    })
+
+    it('matches typed location questions', () => {
+      const phrases = [
+        'location',
+        'location button',
+        'address',
+        'venue',
+        'where is the class located?',
+        'kahan hai class',
+        'kaha aana hoga',
+        'google maps location please',
+      ]
+      for (const phrase of phrases) {
+        const res = getShikhaAutomatedReply({ text: phrase })
+        expect(res?.kind).toBe('location')
+        expect(res?.text).toBe(SHIKHA_YOGA_LOCATION_MESSAGE)
+      }
+    })
+  })
+
+  describe('Fees enquiries', () => {
+    it('matches typed fees questions', () => {
+      const phrases = [
+        'fees',
+        'fee',
+        'what is the fee?',
+        'charges kya hai',
+        'monthly cost',
+        'price of class',
+        'kitni fees hai',
+        'kitna charge hai',
+      ]
+      for (const phrase of phrases) {
+        const res = getShikhaAutomatedReply({ text: phrase })
+        expect(res?.kind).toBe('fees')
+        expect(res?.text).toBe(SHIKHA_YOGA_FEES_MESSAGE)
+      }
+    })
+  })
+
+  describe('Hi / Hello / Non-matching messages (Strictly DO NOT reply)', () => {
+    it('returns null for hi, hello, and generic messages', () => {
+      const phrases = [
+        'hi',
+        'hello',
+        'hey',
+        'Hi Shikha',
+        'Hello mam',
+        'Good morning',
+        'Namaste',
+        'kuch bhi',
+        'ok',
+        'thank you',
+        'can i get more info',
+        'interested',
+        'call me',
+      ]
+      for (const phrase of phrases) {
+        const res = getShikhaAutomatedReply({ text: phrase })
+        expect(res).toBeNull()
+      }
+    })
+  })
+
+  describe('First-match priority when multiple keywords appear', () => {
+    it('sends only timing when timing appears first', () => {
+      const res = getShikhaAutomatedReply({
+        text: 'What is the timing and location?',
+      })
+      expect(res?.kind).toBe('timing')
+      expect(res?.text).toBe(SHIKHA_YOGA_TIMING_MESSAGE)
+    })
+
+    it('sends only location when location appears first', () => {
+      const res = getShikhaAutomatedReply({
+        text: 'Where is the location and what is the fee?',
+      })
+      expect(res?.kind).toBe('location')
+      expect(res?.text).toBe(SHIKHA_YOGA_LOCATION_MESSAGE)
+    })
+
+    it('sends only fees when fees appears first', () => {
+      const res = getShikhaAutomatedReply({
+        text: 'Fees and timing please',
+      })
+      expect(res?.kind).toBe('fees')
+      expect(res?.text).toBe(SHIKHA_YOGA_FEES_MESSAGE)
+    })
+  })
+})
 
 describe('isSessionDetailsClick', () => {
   it('detects button click on Session Details', () => {
@@ -72,6 +233,13 @@ describe('isShikhaBajajAccount', () => {
     ).toBe(true)
     expect(
       await isShikhaBajajAccount(fakeDb, 'c1c18331-6aee-413e-b401-91089a16897e')
+    ).toBe(true)
+  })
+
+  it('identifies Shikha phone number ID', async () => {
+    const fakeDb = {} as any
+    expect(
+      await isShikhaBajajAccount(fakeDb, '', '1116585918214621')
     ).toBe(true)
   })
 
